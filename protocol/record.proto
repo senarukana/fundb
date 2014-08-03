@@ -1,0 +1,15 @@
+package protocol;
+
+import "field.proto";
+
+message Record {
+    repeated FieldValue values = 1;
+    required int64 timestamp = 2;
+    required uint32 serverid = 3;
+}
+
+message RecordList {
+    required string name = 1;
+    repeated string fields = 2;
+    repeated Record values = 3;
+}
