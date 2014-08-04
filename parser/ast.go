@@ -1,69 +1,78 @@
 package parser
 
 import (
+	"fmt"
+	"strconv"
+
 	"github.com/senarukana/fundb/protocol"
 )
 
-type Literal struct {
-	Pos   int
-	Type  protocol.FieldType
-	Value string
-}
-
-type Ident struct {
-	Pos  int
-	Name string
-}
-
 type ValueItems struct {
-	items []*Literal
+	Items []*protocol.FieldValue
 }
 
 type ValueList struct {
-	values []*ValueItems
+	Values []*ValueItems
 }
 
 type ColumnFields struct {
-	fields []*Ident
+	Fields []string
 }
 
-type InsertQuery struct {
-	Table     *Ident
-	Fields    *ColumnFields
-	ValueList *ValueList
-}
-
-func NewColumnField(field *Ident) *ColumnFields {
+func NewColumnField(field string) *ColumnFields {
 	return &ColumnFields{
-		fields: []*Ident{field},
+		Fields: []string{field},
 	}
 }
 
-func ColumnFieldsAppend(columnFields *ColumnFields, field *Ident) *ColumnFields {
+func ColumnFieldsAppend(columnFields *ColumnFields, field string) *ColumnFields {
 	if columnFields == nil {
 		return NewColumnField(field)
 	}
-	columnFields.fields = append(columnFields.fields, field)
+	columnFields.Fields = append(columnFields.Fields, field)
 	return columnFields
 }
 
-func NewValueItem(item *Literal) *ValueItems {
+func NewFieldValue(fieldType protocol.FieldType, src string) *protocol.FieldValue {
+	field := &protocol.FieldValue{}
+	switch fieldType {
+	case protocol.INT:
+		val, _ := strconv.ParseInt(src, 10, 64)
+		field.IntVal = &val
+	case protocol.DOUBLE:
+		val, _ := strconv.ParseFloat(src, 64)
+		field.DoubleVal = &val
+	case protocol.BOOL:
+		val, _ := strconv.ParseBool(src)
+		field.BoolVal = &val
+	case protocol.STRING:
+		field.StrVal = &src
+	case protocol.NULL:
+		empty := ""
+		field.StrVal = &empty
+	default:
+		panic(fmt.Errorf("Invalid field type"))
+	}
+	return field
+}
+
+func NewValueItem(item *protocol.FieldValue) *ValueItems {
 	return &ValueItems{
-		items: []*Literal{item},
+		Items: []*protocol.FieldValue{item},
 	}
 }
 
-func ValueItemAppend(valueItems *ValueItems, item *Literal) *ValueItems {
+func ValueItemAppend(valueItems *ValueItems, item *protocol.FieldValue) *ValueItems {
 	if valueItems == nil {
 		return NewValueItem(item)
 	}
-	valueItems.items = append(valueItems.items, item)
+	valueItems.Items = append(valueItems.Items, item)
 	return valueItems
 }
 
 func NewValueList(items *ValueItems) *ValueList {
 	return &ValueList{
-		values: []*ValueItems{items},
+		Values: []*ValueItems{items},
 	}
 }
 
@@ -71,6 +80,6 @@ func ValueListAppend(valueList *ValueList, items *ValueItems) *ValueList {
 	if valueList == nil {
 		return NewValueList(items)
 	}
-	valueList.values = append(valueList.values, items)
+	valueList.Values = append(valueList.Values, items)
 	return valueList
 }

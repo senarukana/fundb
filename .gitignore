@@ -1,4 +1,5 @@
-*~
+fundb
+data/*
 .DS_Store
 *.output
 grammer.go

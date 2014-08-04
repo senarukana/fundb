@@ -11,4 +11,9 @@ make
 go build
 cd ..
 
+cd core
 go build
+cd ..
+
+go build
+go install

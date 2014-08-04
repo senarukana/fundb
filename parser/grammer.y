@@ -21,8 +21,8 @@ func (t Token) String() string {
 
 %union {
     sql         *Query
-    ident       *Ident
-    literal     *Literal
+    ident       string
+    literal     *protocol.FieldValue
     insert_sql  *InsertQuery
     column_list *ColumnFields
     value_list  *ValueList
@@ -30,9 +30,16 @@ func (t Token) String() string {
     tok         Token
 } 
 
+%left OR
+%left AND
+%left NOT
+%left <tok> EQUAL GREATER GREATEREQ SMALLER SMALLEREQ/* = <> < > <= >= */
+%left PLUS MINUS
+%left STAR DIV
+%nonassoc UMINUS
 
-
-%token <tok> LP RP DOT COMMA NULLX 
+%token <tok> LP RP DOT COMMA STAR NULLX 
+%token <tok> PLUS MINUS DIV 
 %token <tok> SELECT UPDATE DELETE INSERT
 %token <tok> INTO VALUES WHERE FROM
 %token <tok> IDENT STRING DOUBLE INT BOOL
@@ -58,10 +65,7 @@ sql: manipulative_statement {
 
 manipulative_statement:
         insert_statement {
-            $$ = &Query{
-                kind : QUERY_INSERT,
-                queryAST : $1,
-            }
+            $$ = &Query{ QUERY_INSERT, $1}
         }
 
 insert_statement:
@@ -113,32 +117,32 @@ insert_atom:
             $$ = $1
         }
     |   NULLX {
-            $$ = &Literal{$1.Pos, protocol.NULL, ""}
+            $$ = NewFieldValue(protocol.NULL, "")
         }
     ;
 
 column:     
         IDENT {
-            $$ = &Ident{$1.Pos, $1.Src}
+            $$ = $1.Src
         }
 
 table:
         IDENT {
-            $$ = &Ident{$1.Pos, $1.Src}
+            $$ = $1.Src
         }
 
 literal:
         STRING {
-            $$ = &Literal{$1.Pos, protocol.STRING, $1.Src}
+            $$ = NewFieldValue(protocol.STRING, $1.Src)
         }
     |   INT {
-            $$ = &Literal{$1.Pos, protocol.INT, $1.Src}
+            $$ = NewFieldValue(protocol.INT, $1.Src)
         }
     |   DOUBLE {
-            $$ = &Literal{$1.Pos, protocol.DOUBLE, $1.Src}
+            $$ = NewFieldValue(protocol.DOUBLE, $1.Src)
         }
     |   BOOL {
-            $$ = &Literal{$1.Pos, protocol.BOOL, $1.Src}
+            $$ = NewFieldValue(protocol.BOOL, $1.Src)
         }
 
 %%

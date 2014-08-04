@@ -26,10 +26,15 @@ func (err ParserError) Error() string {
 	return err.Message
 }
 
+type InsertQuery struct {
+	Table     string
+	Fields    *ColumnFields
+	ValueList *ValueList
+}
+
 type Query struct {
-	kind     QueryType
-	query    string
-	queryAST interface{}
+	Type  QueryType
+	Query interface{}
 }
 
 func ParseQuery(query string) (*Query, error) {
@@ -38,6 +43,5 @@ func ParseQuery(query string) (*Query, error) {
 		return nil, NewParserError(lex.LastError)
 	}
 	parsedQuery := ParsedQuery
-	parsedQuery.query = query
 	return parsedQuery, nil
 }
