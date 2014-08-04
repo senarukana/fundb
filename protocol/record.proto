@@ -4,7 +4,7 @@ import "field.proto";
 
 message Record {
     repeated FieldValue values = 1;
-    required int64 timestamp = 2;
+    required int64 id = 2;
     required uint32 sequenceNum = 3;
 }
 

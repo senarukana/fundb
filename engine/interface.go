@@ -6,7 +6,6 @@ import (
 
 type storeEngine interface {
 	Init(dataPath string) error
-	Insert(database string, recordList *protocol.RecordList) error
-	DropDatabase(database string) error
+	Insert(recordList *protocol.RecordList) error
 	Close() error
 }

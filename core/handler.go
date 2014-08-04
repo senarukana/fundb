@@ -3,7 +3,6 @@ package core
 import (
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/senarukana/fundb/engine"
 	"github.com/senarukana/fundb/parser"
@@ -47,12 +46,13 @@ func (self *EngineHandler) Query(sql string) *Response {
 }
 
 func (self *EngineHandler) validInsertQuery(query *parser.InsertQuery) error {
-	if len(query.ValueList.Values[0].Items) != len(query.Fields.Fields) {
+	if len(query.Values[0].Items) != len(query.Fields) {
 		return fmt.Errorf("syntax error: Incompatible fields(%d) and values(%d)",
-			len(query.ValueList.Values[0].Items), len(query.Fields.Fields))
+			len(query.Values[0].Items), len(query.Fields))
 	}
+
 	var paramCount = -1
-	for valueIndex, valueItems := range query.ValueList.Values {
+	for valueIndex, valueItems := range query.Values {
 		if paramCount == -1 {
 			paramCount = len(valueItems.Items)
 		}
@@ -60,30 +60,36 @@ func (self *EngineHandler) validInsertQuery(query *parser.InsertQuery) error {
 			return fmt.Errorf("syntax error: Incompatible value paramters in %d, paremter num is %d, exptected %d",
 				valueIndex, len(valueItems.Items), paramCount)
 		}
+
 	}
 	return nil
 }
 
 func (self *EngineHandler) insert(query *parser.InsertQuery) *Response {
+	err := self.validInsertQuery(query)
+	if err != nil {
+		return &Response{
+			Error: err,
+		}
+	}
 	recordList := &protocol.RecordList{
 		Name:   &query.Table,
-		Fields: query.Fields.Fields,
+		Fields: query.Fields,
 		Values: make([]*protocol.Record, 0, len(query.ValueList.Values)),
 	}
-	now := time.Now().UnixNano()
 	self.sequenceNumberLock.Lock()
 	defer self.sequenceNumberLock.Unlock()
+
 	for _, valueItems := range query.ValueList.Values {
 		sn := self.currentSequenceNumber
 		record := &protocol.Record{
-			Timestamp:   &now,
 			SequenceNum: &sn,
 			Values:      valueItems.Items,
 		}
 		self.currentSequenceNumber++
 		recordList.Values = append(recordList.Values, record)
 	}
-	err := self.storeEngine.Insert(defaultDatabase, recordList)
+	err = self.storeEngine.Insert(recordList)
 	if err != nil {
 		return &Response{
 			Error: err,

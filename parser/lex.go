@@ -14,14 +14,20 @@ var (
 	stringRe        = regexp.MustCompile("^((\"[^\"]*\")|(\\'[^\\']*\\'))")
 	identRe         = regexp.MustCompile("[a-zA-z]+")
 	KeywordTokenMap = map[string]int{
-		"SELECT": SELECT,
-		"UPDATE": UPDATE,
-		"DELETE": DELETE,
-		"INSERT": INSERT,
-		"FROM":   FROM,
-		"WHERE":  WHERE,
-		"INTO":   INTO,
-		"VALUES": VALUES,
+		"SELECT":   SELECT,
+		"UPDATE":   UPDATE,
+		"DELETE":   DELETE,
+		"INSERT":   INSERT,
+		"FROM":     FROM,
+		"WHERE":    WHERE,
+		"INTO":     INTO,
+		"VALUES":   VALUES,
+		"ORDER":    ORDER,
+		"BY":       BY,
+		"DISTINCT": DISTINCT,
+		"AST":      ASC,
+		"DESC":     DESC,
+		"LIMIT":    LIMIT,
 	}
 	OPTokenMap = map[string]int{
 		"(": LP,

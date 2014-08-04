@@ -4,6 +4,7 @@ package parser
 
 import (
     "github.com/senarukana/fundb/protocol"
+    "strconv"
 )
 
 var ParsedQuery *Query
@@ -53,7 +54,7 @@ func (t Token) String() string {
 %token <tok> PLUS MINUS DIV OR AND
 %token <tok> SELECT UPDATE DELETE INSERT
 %token <tok> INTO VALUES WHERE FROM 
-%token <tok> ORDER BY DISTINCT ASC DESC
+%token <tok> ORDER BY DISTINCT ASC DESC LIMIT
 %token <tok> IDENT STRING DOUBLE INT BOOL
 %token <tok> EQUAL GREATER GREATEREQ SMALLER SMALLEREQ
 
@@ -74,7 +75,7 @@ func (t Token) String() string {
 %type <where_exp> opt_where_exp where_exp search_condition predicate comparison_predicate
 %type <order_by_exp> opt_order_by_exp ordering_spec_commalist
 %type <ordering_spec> ordering_spec
-%type <int_exp> opt_asc_desc
+%type <int_exp> opt_asc_desc opt_limit_exp
 %type <bool_exp> opt_distinct
 
 
@@ -95,8 +96,8 @@ manipulative_statement:
         }
 
 select_statement:
-        SELECT opt_distinct selection table_exp {
-            $$ = &SelectQuery{$2, $3, $4}
+        SELECT opt_distinct selection table_exp opt_limit_exp{
+            $$ = &SelectQuery{$2, $3, $4, $5}
         }
     ;
 
@@ -223,6 +224,14 @@ opt_asc_desc:
     |   DESC {
             $$ = 2
         }
+opt_limit_exp:
+        /* empty */ {
+            $$ = -1
+        }
+    |   LIMIT INT {
+            val, _ := strconv.ParseInt($2.Src, 10, 64)
+            $$ = int(val)
+    }
 
 insert_statement:
         INSERT INTO table opt_column_commalist VALUES values_list {

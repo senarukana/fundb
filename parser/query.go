@@ -27,15 +27,16 @@ func (err ParserError) Error() string {
 }
 
 type InsertQuery struct {
-	Table     string
-	Fields    *ColumnFields
-	ValueList *ValueList
+	Table string
+	*ColumnFields
+	*ValueList
 }
 
 type SelectQuery struct {
-	Distinct         bool
-	SelectExpression *SelectExpression
-	TableExpression  *TableExpression
+	Distinct bool
+	*SelectExpression
+	*TableExpression
+	Limit int
 }
 
 type Query struct {
