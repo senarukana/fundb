@@ -24,10 +24,16 @@ var (
 		"VALUES": VALUES,
 	}
 	OPTokenMap = map[string]int{
-		"(":  LP,
-		")":  RP,
-		",":  COMMA,
-		".":  DOT,
+		"(": LP,
+		")": RP,
+		",": COMMA,
+		".": DOT,
+	}
+	LogicalMap = map[string]int{
+		"OR":  OR,
+		"AND": AND,
+	}
+	ComparisonMap = map[string]int{
 		"=":  EQUAL,
 		">":  GREATER,
 		">=": GREATEREQ,
@@ -100,6 +106,22 @@ func (l *Lex) Lex(lval *FunDBSymType) int {
 	}
 
 	for op, token := range OPTokenMap {
+		if strings.HasPrefix(cur, op) {
+			lval.tok = l.MkTok(op)
+			l.Pos += len(op)
+			return token
+		}
+	}
+
+	for op, token := range ComparisonMap {
+		if strings.HasPrefix(cur, op) {
+			lval.tok = l.MkTok(op)
+			l.Pos += len(op)
+			return token
+		}
+	}
+
+	for op, token := range LogicalMap {
 		if strings.HasPrefix(cur, op) {
 			lval.tok = l.MkTok(op)
 			l.Pos += len(op)

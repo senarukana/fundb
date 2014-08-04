@@ -7,6 +7,53 @@ import (
 	"github.com/senarukana/fundb/protocol"
 )
 
+type ScalarType int
+
+const (
+	SCALAR_IDENT ScalarType = iota
+	SCLAR_LITERAL
+)
+
+type WhereExpression struct {
+	Left   interface{}
+	Right  interface{}
+	IsBool bool
+	Token  string
+}
+
+type TableExpression struct {
+	*FromExpression
+	*WhereExpression
+	*OrderByList
+}
+
+type SelectExpression struct {
+	IsStar bool
+	*ScalarList
+}
+
+type ScalarList struct {
+	ScalarList []*Scalar
+}
+
+type Scalar struct {
+	Type ScalarType
+	Val  interface{}
+}
+
+type FromExpression struct {
+	Table string
+}
+
+type OrderByList struct {
+	OrderBys []*OrderBy
+}
+
+type OrderBy struct {
+	Field string
+	Order int
+}
+
 type ValueItems struct {
 	Items []*protocol.FieldValue
 }
@@ -17,6 +64,34 @@ type ValueList struct {
 
 type ColumnFields struct {
 	Fields []string
+}
+
+func NewScalarList(scalar *Scalar) *ScalarList {
+	return &ScalarList{
+		ScalarList: []*Scalar{scalar},
+	}
+}
+
+func ScalarListAppend(scalarList *ScalarList, scalar *Scalar) *ScalarList {
+	if scalarList == nil {
+		return NewScalarList(scalar)
+	}
+	scalarList.ScalarList = append(scalarList.ScalarList, scalar)
+	return scalarList
+}
+
+func NewOrderByList(order *OrderBy) *OrderByList {
+	return &OrderByList{
+		OrderBys: []*OrderBy{order},
+	}
+}
+
+func OrderByListAppend(orderList *OrderByList, order *OrderBy) *OrderByList {
+	if orderList == nil {
+		return NewOrderByList(order)
+	}
+	orderList.OrderBys = append(orderList.OrderBys, order)
+	return orderList
 }
 
 func NewColumnField(field string) *ColumnFields {

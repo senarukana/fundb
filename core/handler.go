@@ -40,6 +40,8 @@ func (self *EngineHandler) Query(sql string) *Response {
 	switch query.Type {
 	case parser.QUERY_INSERT:
 		return self.insert(query.Query.(*parser.InsertQuery))
+	case parser.QUERY_SELECT:
+		return self.fetch(query.Query.(*parser.SelectQuery))
 	}
 	return nil
 }
@@ -91,4 +93,9 @@ func (self *EngineHandler) insert(query *parser.InsertQuery) *Response {
 			RowsAffected: uint64(len(query.ValueList.Values)),
 		}
 	}
+}
+
+func (self *EngineHandler) fetch(query *parser.SelectQuery) *Response {
+
+	return &Response{}
 }

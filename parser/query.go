@@ -32,6 +32,12 @@ type InsertQuery struct {
 	ValueList *ValueList
 }
 
+type SelectQuery struct {
+	Distinct         bool
+	SelectExpression *SelectExpression
+	TableExpression  *TableExpression
+}
+
 type Query struct {
 	Type  QueryType
 	Query interface{}
