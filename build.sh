@@ -1,18 +1,11 @@
 #!/bin/sh
-
+rm -rf data/
 cd protocol
-protoc --go_out=. field.proto
-protoc --go_out=. --proto_path= field.proto record.proto
-go build
+./build
 cd ..
 
 cd parser
 make
-go build
-cd ..
-
-cd core
-go build
 cd ..
 
 go build

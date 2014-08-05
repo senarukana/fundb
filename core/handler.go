@@ -10,11 +10,12 @@ import (
 )
 
 const (
-	defaultDatabase = "default"
+	defaultDatabase   = "default"
+	reserverdIdColumn = "_id"
 )
 
 type EngineHandler struct {
-	storeEngine           *engine.EngineManager
+	*engine.EngineManager
 	currentSequenceNumber uint32
 	sequenceNumberLock    sync.Mutex
 }
@@ -25,7 +26,7 @@ func NewEngineHandler(engineName, dataPath string) (*EngineHandler, error) {
 		return nil, err
 	}
 	return &EngineHandler{
-		storeEngine: engineManager,
+		EngineManager: engineManager,
 	}, nil
 }
 
@@ -37,10 +38,14 @@ func (self *EngineHandler) Query(sql string) *Response {
 		}
 	}
 	switch query.Type {
+	case parser.QUERY_SCHEMA_TABLE_CREATE:
+		return self.craeteTable(query.Query.(*parser.CreateTableQuery))
 	case parser.QUERY_INSERT:
 		return self.insert(query.Query.(*parser.InsertQuery))
 	case parser.QUERY_SELECT:
 		return self.fetch(query.Query.(*parser.SelectQuery))
+	default:
+		panic(fmt.Sprintf("UNKNOWN Query Type %d", query.Type))
 	}
 	return nil
 }
@@ -65,31 +70,54 @@ func (self *EngineHandler) validInsertQuery(query *parser.InsertQuery) error {
 	return nil
 }
 
+func (self *EngineHandler) craeteTable(query *parser.CreateTableQuery) *Response {
+	return &Response{
+		Error: self.CreateTable(query.Name, query.Type),
+	}
+}
+
+// append _id column in both fields and values
+func (self *EngineHandler) appendIdIfNeeded(query *parser.InsertQuery) {
+	foundId := false
+	for _, field := range query.Fields {
+		if field == reserverdIdColumn {
+			foundId = true
+			break
+		}
+	}
+	if !foundId {
+		query.Fields = append(query.Fields, reserverdIdColumn)
+		for _, valueItems := range query.Values {
+			dummyIdField := &protocol.FieldValue{}
+			valueItems.Items = append(valueItems.Items, dummyIdField)
+		}
+	}
+}
+
 func (self *EngineHandler) insert(query *parser.InsertQuery) *Response {
 	err := self.validInsertQuery(query)
-	if err != nil {
-		return &Response{
-			Error: err,
+	if err == nil {
+		self.appendIdIfNeeded(query)
+		recordList := &protocol.RecordList{
+			Name:   &query.Table,
+			Fields: query.Fields,
+			Values: make([]*protocol.Record, 0, len(query.Values)),
 		}
-	}
-	recordList := &protocol.RecordList{
-		Name:   &query.Table,
-		Fields: query.Fields,
-		Values: make([]*protocol.Record, 0, len(query.ValueList.Values)),
-	}
-	self.sequenceNumberLock.Lock()
-	defer self.sequenceNumberLock.Unlock()
+		self.sequenceNumberLock.Lock()
+		defer self.sequenceNumberLock.Unlock()
 
-	for _, valueItems := range query.ValueList.Values {
-		sn := self.currentSequenceNumber
-		record := &protocol.Record{
-			SequenceNum: &sn,
-			Values:      valueItems.Items,
+		for _, valueItems := range query.Values {
+			sn := self.currentSequenceNumber
+			record := &protocol.Record{
+				SequenceNum: &sn,
+				Values:      valueItems.Items,
+			}
+			self.currentSequenceNumber++
+			recordList.Values = append(recordList.Values, record)
 		}
-		self.currentSequenceNumber++
-		recordList.Values = append(recordList.Values, record)
+		err = self.Insert(recordList)
 	}
-	err = self.storeEngine.Insert(recordList)
+
 	if err != nil {
 		return &Response{
 			Error: err,
@@ -102,6 +130,24 @@ func (self *EngineHandler) insert(query *parser.InsertQuery) *Response {
 }
 
 func (self *EngineHandler) fetch(query *parser.SelectQuery) *Response {
+	var resultList *protocol.RecordList
+	columns := getFetchColumns(query)
+	condition, idStart, idEnd, err := getIdCondition(query.WhereExpression)
+	if err == nil {
+		if idStart == InvalidInt {
+			idStart = 0
+		}
+		resultList, err = self.Fetch(query.Table, columns, idStart, idEnd, condition, query.Limit)
+	}
 
-	return &Response{}
+	if err != nil {
+		return &Response{
+			Error: err,
+		}
+	} else {
+		return &Response{
+			RowsAffected: uint64(len(resultList.Values)),
+			Results:      resultList,
+		}
+	}
 }

@@ -2,7 +2,6 @@ package protocol
 
 import (
 	"testing"
-	"time"
 
 	"code.google.com/p/goprotobuf/proto"
 	"github.com/bmizerany/assert"
@@ -16,10 +15,10 @@ func TestCanMarshalAndUnmarshal(t *testing.T) {
 
 	record := &Record{}
 	record.Values = []*FieldValue{field}
-	ts := time.Now().Unix()
-	record.Timestamp = &ts
+	id := int64(1)
+	record.Id = &id
 	s := uint32(1)
-	record.Serverid = &s
+	record.SequenceNum = &s
 
 	d, err := proto.Marshal(record)
 	assert.Equal(t, err, nil)
@@ -28,4 +27,8 @@ func TestCanMarshalAndUnmarshal(t *testing.T) {
 	err = proto.Unmarshal(d, unmarshalRecord)
 	assert.Equal(t, err, nil)
 	assert.Equal(t, unmarshalRecord.Values[0].GetIntVal(), f)
+
+	oid := unmarshalRecord.GetId()
+	*unmarshalRecord.Id += 5
+	assert.Equal(t, unmarshalRecord.GetId(), oid+5)
 }

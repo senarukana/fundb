@@ -14,17 +14,37 @@ const (
 	SCLAR_LITERAL
 )
 
+type WhereType int
+
+const (
+	WHERE_AND WhereType = iota
+	WHERE_COMPARISON
+	WHERE_BETWEEN
+)
+
+type TableIdType int
+
+const (
+	TABLE_ID_RANDOM TableIdType = iota
+	TABLE_ID_INCREMENT
+)
+
 type WhereExpression struct {
-	Left   interface{}
-	Right  interface{}
-	IsBool bool
-	Token  string
+	Left  interface{}
+	Right interface{}
+	Type  WhereType
+	Token Token
 }
 
 type TableExpression struct {
 	*FromExpression
 	*WhereExpression
 	*OrderByList
+}
+
+type BetweenExpression struct {
+	Left  *Scalar
+	Right *Scalar
 }
 
 type SelectExpression struct {
@@ -64,6 +84,18 @@ type ValueList struct {
 
 type ColumnFields struct {
 	Fields []string
+}
+
+func NewBetweenExpression(token Token, field string, left, right *Scalar) *WhereExpression {
+	return &WhereExpression{
+		Type:  WHERE_BETWEEN,
+		Left:  field,
+		Token: token,
+		Right: &BetweenExpression{
+			Left:  left,
+			Right: right,
+		},
+	}
 }
 
 func NewScalarList(scalar *Scalar) *ScalarList {

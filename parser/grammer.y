@@ -24,6 +24,7 @@ func (t Token) String() string {
     sql         *Query
     ident       string
     literal     *protocol.FieldValue
+    create_table *CreateTableQuery
     insert_sql  *InsertQuery
     select_statement *SelectQuery
     selection   *SelectExpression
@@ -39,6 +40,7 @@ func (t Token) String() string {
     scalar_list *ScalarList
     int_exp     int
     bool_exp    bool 
+    table_id_type TableIdType
     tok         Token
 } 
 
@@ -52,13 +54,15 @@ func (t Token) String() string {
 
 %token <tok> LP RP DOT COMMA STAR NULLX 
 %token <tok> PLUS MINUS DIV OR AND
+%token <tok> CREATE TABLE TYPE INCREMENT RANDOM
 %token <tok> SELECT UPDATE DELETE INSERT
-%token <tok> INTO VALUES WHERE FROM 
+%token <tok> INTO VALUES WHERE FROM BETWEEN
 %token <tok> ORDER BY DISTINCT ASC DESC LIMIT
 %token <tok> IDENT STRING DOUBLE INT BOOL
 %token <tok> EQUAL GREATER GREATEREQ SMALLER SMALLEREQ
 
-%type <sql> sql manipulative_statement
+%type <sql> sql manipulative_statement schema_statement
+%type <create_table> create_table_statement
 %type <insert_sql> insert_statement
 %type <select_statement> select_statement
 %type <ident> table column
@@ -72,27 +76,49 @@ func (t Token) String() string {
 %type <scalar> scalar_exp
 %type <table_exp> table_exp
 %type <from_exp> from_exp table_ref_commalist
-%type <where_exp> opt_where_exp where_exp search_condition predicate comparison_predicate
+%type <where_exp> opt_where_exp where_exp search_condition predicate comparison_predicate between_predicate
 %type <order_by_exp> opt_order_by_exp ordering_spec_commalist
 %type <ordering_spec> ordering_spec
 %type <int_exp> opt_asc_desc opt_limit_exp
 %type <bool_exp> opt_distinct
+%type <table_id_type> opt_id_type
 
 
 %start sql
 
 %%
-sql: manipulative_statement {
-        ParsedQuery = $1
-    }
+sql: 
+        schema_statement 
+    |   manipulative_statement
+
+schema_statement:
+        create_table_statement {
+            ParsedQuery = &Query { QUERY_SCHEMA_TABLE_CREATE, $1}
+        }
+
+create_table_statement:
+        CREATE TABLE IDENT opt_id_type {
+            $$ = &CreateTableQuery{$3.Src, $4}
+        }
+
+opt_id_type:
+        /* empty */ {
+            $$ = TABLE_ID_RANDOM
+        }
+    |   RANDOM {
+            $$ = TABLE_ID_RANDOM
+        }
+    |   INCREMENT {
+            $$ = TABLE_ID_INCREMENT
+        } 
     
 
 manipulative_statement:
         insert_statement {
-            $$ = &Query{ QUERY_INSERT, $1}
+            ParsedQuery = &Query{ QUERY_INSERT, $1}
         }
     |   select_statement {
-            $$ = &Query{ QUERY_SELECT, $1}
+            ParsedQuery = &Query{ QUERY_SELECT, $1}
         }
 
 select_statement:
@@ -164,34 +190,37 @@ search_condition:
         LP search_condition RP {
             $$ = $2
         }
-    |   search_condition OR search_condition {
-            $$ = &WhereExpression{$1, $3, false, $2.Src}
-
-        }
     |   search_condition AND search_condition {
-            $$ = &WhereExpression{$1, $3, false, $2.Src}
+            $$ = &WhereExpression{$1, $3, WHERE_AND, $2}
         }
     |   predicate
 
 predicate:
         comparison_predicate 
+    |   between_predicate
 
 comparison_predicate:
-        scalar_exp EQUAL scalar_exp {
-            $$ = &WhereExpression{$1, $3, true, $2.Src}
+        IDENT EQUAL scalar_exp {
+            $$ = &WhereExpression{$1.Src, $3, WHERE_COMPARISON, $2}
         }
-    |   scalar_exp SMALLER scalar_exp {
-            $$ = &WhereExpression{$1, $3, true, $2.Src}
+    |   IDENT SMALLER scalar_exp {
+            $$ = &WhereExpression{$1.Src, $3, WHERE_COMPARISON, $2}
         }
-    |   scalar_exp GREATER scalar_exp {
-            $$ = &WhereExpression{$1, $3, true, $2.Src}
+    |   IDENT GREATER scalar_exp {
+            $$ = &WhereExpression{$1.Src, $3, WHERE_COMPARISON, $2}
         }
-    |   scalar_exp SMALLEREQ scalar_exp {
-            $$ = &WhereExpression{$1, $3, true, $2.Src}
+    |   IDENT SMALLEREQ scalar_exp {
+            $$ = &WhereExpression{$1.Src, $3, WHERE_COMPARISON, $2}
         }
-    |   scalar_exp GREATEREQ scalar_exp {
-            $$ = &WhereExpression{$1, $3, true, $2.Src}
+    |   IDENT GREATEREQ scalar_exp {
+            $$ = &WhereExpression{$1.Src, $3, WHERE_COMPARISON, $2}
         }
+
+between_predicate:
+        IDENT BETWEEN scalar_exp AND scalar_exp {
+            $$ = NewBetweenExpression($2, $1.Src, $3, $5)
+        }
+    ;
 
 opt_order_by_exp:
         /* empty */ {

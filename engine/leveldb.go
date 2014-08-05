@@ -4,13 +4,15 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"hash/fnv"
+	"math/rand"
 	"sync"
-	"time"
 
 	"github.com/senarukana/fundb/parser"
 	"github.com/senarukana/fundb/protocol"
 
 	"code.google.com/p/goprotobuf/proto"
+	"github.com/golang/glog"
 	"github.com/jmhodges/levigo"
 )
 
@@ -18,17 +20,21 @@ const (
 	LEVELDB_CACHE_SIZE        = 1024 * 1024 * 16 // 16MB
 	LEVELDB_BLOCK_SIZE        = 256 * 1024
 	LEVELDB_BLOOM_FILTER_BITS = 64
-	MAX_POINTS_TO_SCAN        = 1000000
+	LEVELDB_MAX_RECORD_NUM    = 100000
+	LEVELDB_MAX_FETCH_SIZE    = 1024 * 1024 // 1MB
+	LEVELDB_META_NUM          = 4
 	SEPERATOR                 = '|'
-	MAX_RECORD_NUM            = 100000
-	MAX_FETCH_SIZE            = 1024 * 1024 // 1MB
+	SEED                      = 987654
+	RESERVED_ID_COLUMN        = "_id"
 )
 
 var (
-	EMPTYBYTE                  = []byte(" ")
-	LEVELDB_META_PREFIX        = []byte("META")
-	LEVELDB_TABLE_PREFIX       = []byte("META_TABLE")
-	LEVELDB_TABLEFIELDS_PREFIX = []byte("META_FIELD")
+	EMPTYBYTE                   = []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
+	LEVELDB_META_PREFIX         = []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01}
+	LEVELDB_TABLE_FIELDS_PREFIX = []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10}
+
+	ID_INCREMENT = []byte{0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
+	ID_RANDOM    = []byte{0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01}
 )
 
 type rawRecordValue struct {
@@ -42,18 +48,10 @@ type Field struct {
 	Id   []byte
 }
 
-var (
-	ID_INCREMENT = []byte{0x00, 0x00}
-	ID_TIMESTAMP = []byte{0x00, 0x01}
-)
-
 type TableInfo struct {
 	sync.Mutex
 	columns map[string][]byte
-	IdType  []byte
-	nextId  int64
-	records int64
-	size    int64 // bit
+	*protocol.Table
 }
 
 type LevelDBEngine struct {
@@ -65,6 +63,59 @@ type LevelDBEngine struct {
 func NewLevelDBEngine() storeEngine {
 	leveldbEngine := new(LevelDBEngine)
 	return leveldbEngine
+}
+
+func genereateColumnId(table, column string) []byte {
+	h := fnv.New64()
+	b := []byte(fmt.Sprintf("%s%c%s", table, SEPERATOR, column))
+	idBuffer := bytes.NewBuffer(make([]byte, 0, 8))
+	h.Write(b)
+	val := h.Sum64()
+	binary.Write(idBuffer, binary.BigEndian, val)
+	return idBuffer.Bytes()
+}
+
+func genereateMetaTableKey(table string) []byte {
+	return []byte(table)
+}
+
+func (self *LevelDBEngine) initMetaInfo() error {
+	self.schema = make(map[string]*TableInfo)
+
+	ro := levigo.NewReadOptions()
+	it := self.NewIterator(ro)
+	defer ro.Close()
+	defer it.Close()
+	isValid := true
+	it.Seek(LEVELDB_META_PREFIX)
+
+	for isValid {
+		isValid = false
+		if it.Valid() {
+			key := it.Key()
+			prefix := key[:8]
+			if bytes.Compare(prefix, LEVELDB_META_PREFIX) == 0 {
+				table := &protocol.Table{}
+				if err := proto.Unmarshal(it.Value(), table); err != nil {
+					return err
+				}
+				ti := &TableInfo{
+					Table:   table,
+					columns: make(map[string][]byte),
+				}
+
+				for _, column := range ti.GetColumns() {
+					ti.columns[column] = genereateColumnId(table.GetName(), column)
+				}
+				self.schema[table.GetName()] = ti
+				isValid = true
+
+				glog.V(2).Infoln(table)
+				it.Next()
+			}
+		}
+	}
+	return nil
 }
 
 func (self *LevelDBEngine) Init(dataPath string) (err error) {
@@ -79,91 +130,146 @@ func (self *LevelDBEngine) Init(dataPath string) (err error) {
 		return err
 	}
 
-	return nil
+	return self.initMetaInfo()
 }
 
-func (self *LevelDBEngine) genereateTableKey(table string) []byte {
-	// check if table exists
-	b := []byte(table)
-	tableKey := append(LEVELDB_TABLE_PREFIX, b...)
-	return tableKey
-}
-
-func (self *LevelDBEngine) genereateColumnKey(table, column string) []byte {
-	// check if table exists
-	b := []byte(fmt.Sprintf("%s%c%s", table, SEPERATOR, column))
-	columnKey := append(LEVELDB_TABLEFIELDS_PREFIX, b...)
-	return columnKey
+func (self *LevelDBEngine) updateMeta(table string) error {
+	ti := self.schema[table]
+	wo := levigo.NewWriteOptions()
+	key := append(LEVELDB_META_PREFIX, genereateMetaTableKey(table)...)
+	val, err := proto.Marshal(ti.Table)
+	if err != nil {
+		return err
+	}
+	return self.Put(wo, key, val)
 }
 
 func (self *LevelDBEngine) getIdForDBTableColumn(table, column string) ([]byte, error) {
-	wo := levigo.NewWriteOptions()
-	wo.SetSync(true)
-	defer wo.Close()
-	tableInfo := self.schema[table]
-	if key, ok := tableInfo.columns[column]; ok {
-		return key, nil
-	} else {
-		key := self.genereateColumnKey(table, column)
-		if err := self.Put(wo, key, EMPTYBYTE); err != nil {
-			return nil, err
+	if ti, ok := self.schema[table]; ok {
+		if columnId, ok := ti.columns[column]; ok {
+			return columnId, nil
+		} else {
+			ti.Columns = append(ti.Columns, column)
+			columnId := genereateColumnId(table, column)
+			ti.columns[column] = columnId
+			if err := self.updateMeta(table); err != nil {
+				return nil, err
+			}
+			glog.V(3).Infof("Create new column %s\n", column)
+			return columnId, nil
 		}
-
-		self.schema[table].columns[column] = key
-		return key, nil
+	} else {
+		return nil, fmt.Errorf("Table %s not existed", table)
 	}
 }
 
+func (self *LevelDBEngine) CreateTable(table string, idtype parser.TableIdType) error {
+	if _, ok := self.schema[table]; ok {
+		return fmt.Errorf("Table %s already existed", table)
+	}
+
+	var (
+		records, size int64
+		nextid        int64 = 1
+		columns             = []string{"_id"}
+	)
+	ti := &TableInfo{
+		Table:   &protocol.Table{},
+		columns: make(map[string][]byte),
+	}
+	ti.columns["_id"] = genereateColumnId(table, "_id")
+	ti.Table.Name = &table
+	ti.Table.Records = &records
+	ti.Table.Size = &size
+	ti.Table.Columns = columns
+	if idtype == parser.TABLE_ID_RANDOM {
+		ti.Table.Idtype = ID_RANDOM
+	} else {
+		ti.Table.Idtype = ID_INCREMENT
+		ti.Table.Nextid = &nextid
+	}
+	tableKey := append(LEVELDB_META_PREFIX, []byte(table)...)
+	wo := levigo.NewWriteOptions()
+	wo.SetSync(true)
+	val, err := proto.Marshal(ti.Table)
+	if err == nil {
+		if err = self.Put(wo, tableKey, val); err != nil {
+			return err
+		}
+	}
+	if err == nil {
+		self.schema[table] = ti
+	}
+
+	return err
+}
+
+func (self *LevelDBEngine) checkTableExistence(table string) error {
+	if _, ok := self.schema[table]; !ok {
+		return fmt.Errorf("Table %s not existed", table)
+	}
+	return nil
+}
+
 func (self *LevelDBEngine) Insert(recordList *protocol.RecordList) error {
+	if err := self.checkTableExistence(recordList.GetName()); err != nil {
+		return err
+	}
+	var id int64
+	size := 0
 	wo := levigo.NewWriteOptions()
 	wb := levigo.NewWriteBatch()
 	defer wo.Close()
 	defer wb.Close()
-	if _, ok := self.schema[recordList.GetName()]; !ok {
-		wo.SetSync(true)
-		if err := self.Put(wo, self.genereateTableKey(recordList.GetName()), ID_INCREMENT); err != nil {
-			return err
-		}
-		self.schema[recordList.GetName()] = &TableInfo{
-			IdType: ID_INCREMENT,
-			nextId: int64(1),
-		}
-	}
 
-	tableInfo := self.schema[recordList.GetName()]
-	tableInfo.Lock()
-	defer tableInfo.Unlock()
-	for fieldIndex, field := range recordList.Fields {
-		id, err := self.getIdForDBTableColumn(recordList.GetName(), field)
-		if err != nil {
-			return err
+	ti := self.schema[recordList.GetName()]
+	ti.Lock()
+	defer ti.Unlock()
+	for _, record := range recordList.Values {
+		if bytes.Equal(ti.GetIdtype(), ID_RANDOM) {
+			id = rand.Int63n(SEED)
+		} else if bytes.Equal(ti.GetIdtype(), ID_INCREMENT) {
+			id = ti.GetNextid()
+		} else {
+			panic("INVALID Id TYPE")
 		}
-		for _, record := range recordList.Values {
+		for fieldIndex, field := range recordList.Fields {
+			if field == RESERVED_ID_COLUMN {
+				record.Values[fieldIndex].IntVal = &id
+			}
+			columnId, err := self.getIdForDBTableColumn(recordList.GetName(), field)
+			if err != nil {
+				return err
+			}
 			idBuffer := bytes.NewBuffer(make([]byte, 0, 8))
 			sequenceNumberBuffer := bytes.NewBuffer(make([]byte, 0, 4))
-			if bytes.Compare(tableInfo.IdType, ID_INCREMENT) == 0 {
-				binary.Write(idBuffer, binary.BigEndian, tableInfo.nextId)
-			} else {
-				binary.Write(idBuffer, binary.BigEndian, time.Now().UnixNano())
-			}
+			binary.Write(idBuffer, binary.BigEndian, id)
 			binary.Write(sequenceNumberBuffer, binary.BigEndian, record.SequenceNum)
-			recordKey := append(append(id, idBuffer.Bytes()...), sequenceNumberBuffer.Bytes()...)
-			fmt.Println(record.Values[fieldIndex].String())
+
+			recordKey := append(append(columnId, idBuffer.Bytes()...), sequenceNumberBuffer.Bytes()...)
+			glog.V(2).Infof("Insert : %s", record.Values[fieldIndex].String())
 			data, err := proto.Marshal(record.Values[fieldIndex])
 			if err != nil {
 				return err
 			}
 			wb.Put(recordKey, data)
-			tableInfo.nextId++
+			size += len(data) + len(recordKey)
 		}
+		(*ti.Nextid)++
 	}
-	return self.Write(wo, wb)
+	if err := self.Write(wo, wb); err != nil {
+		return err
+	}
+	*ti.Size += int64(size)
+	*ti.Records += int64(len(recordList.Values))
+	return self.updateMeta(recordList.GetName())
 }
 
 func (self *LevelDBEngine) getFieldsForTable(table string, columns []string) (fields []*Field, err error) {
 	fields = make([]*Field, 0, len(columns))
+	ti := self.schema[table]
 	for _, column := range columns {
-		if fieldId, ok := self.schema[table].columns[column]; ok {
+		if fieldId, ok := ti.columns[column]; ok {
 			field := &Field{
 				Id:   fieldId,
 				Name: column,
@@ -176,8 +282,12 @@ func (self *LevelDBEngine) getFieldsForTable(table string, columns []string) (fi
 	return fields, nil
 }
 
-func (self *LevelDBEngine) executeQueryForTable(table string, columns []string,
-	idStart, idEnd int, whereExpr *parser.WhereExpression, limit int) (*protocol.RecordList, error) {
+func (self *LevelDBEngine) Fetch(table string, columns []string,
+	idStart, idEnd int64, whereExpr *parser.WhereExpression, limit int) (*protocol.RecordList, error) {
+	if err := self.checkTableExistence(table); err != nil {
+		return nil, err
+	}
+	glog.V(1).Infof("table %s, columns %v, start %d, end %d, limit %d", table, columns, idStart, idEnd, limit)
 
 	idStartBytesBuffer := bytes.NewBuffer(make([]byte, 0, 8))
 	idEndBytesBuffer := bytes.NewBuffer(make([]byte, 0, 8))
@@ -202,15 +312,15 @@ func (self *LevelDBEngine) executeQueryForTable(table string, columns []string,
 		ro := levigo.NewReadOptions()
 		defer ro.Close()
 		iterators[i] = self.NewIterator(ro)
-		iterators[i].Seek(field.Id)
+		iterators[i].Seek(append(field.Id, idStartBytes...))
 	}
 
 	result := &protocol.RecordList{Name: &table, Fields: fieldNames, Values: make([]*protocol.Record, 0)}
 	rawRecordValues := make([]*rawRecordValue, fieldCount, fieldCount)
 	isValid := true
 
-	if limit == 0 {
-		limit = MAX_RECORD_NUM
+	if limit == -1 {
+		limit = LEVELDB_MAX_RECORD_NUM
 	}
 
 	resultByteCount := 0
@@ -226,6 +336,7 @@ func (self *LevelDBEngine) executeQueryForTable(table string, columns []string,
 				if len(key) >= 16 {
 					// check id is between idStart and idEnd
 					id := key[8:16]
+					glog.V(2).Infof("id %v, start %v, end %v", id, idStartBytes, idEndBytes)
 					if bytes.Equal(key[:8], fields[i].Id) && bytes.Compare(id, idStartBytes) > -1 && bytes.Compare(id, idEndBytes) < 1 {
 						v := it.Value()
 						s := key[16:]
@@ -274,7 +385,7 @@ func (self *LevelDBEngine) executeQueryForTable(table string, columns []string,
 			resultByteCount += 16
 
 			// check if we should send the batch along
-			if resultByteCount > MAX_FETCH_SIZE {
+			if resultByteCount > LEVELDB_MAX_FETCH_SIZE {
 				break
 			}
 		}

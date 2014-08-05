@@ -12,6 +12,7 @@ const (
 	QUERY_DELETE
 	QUERY_INSERT
 	QUERY_UPDATE
+	QUERY_SCHEMA_TABLE_CREATE
 )
 
 type ParserError struct {
@@ -37,6 +38,11 @@ type SelectQuery struct {
 	*SelectExpression
 	*TableExpression
 	Limit int
+}
+
+type CreateTableQuery struct {
+	Name string
+	Type TableIdType
 }
 
 type Query struct {

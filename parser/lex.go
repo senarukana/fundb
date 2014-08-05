@@ -14,30 +14,34 @@ var (
 	stringRe        = regexp.MustCompile("^((\"[^\"]*\")|(\\'[^\\']*\\'))")
 	identRe         = regexp.MustCompile("[a-zA-z]+")
 	KeywordTokenMap = map[string]int{
-		"SELECT":   SELECT,
-		"UPDATE":   UPDATE,
-		"DELETE":   DELETE,
-		"INSERT":   INSERT,
-		"FROM":     FROM,
-		"WHERE":    WHERE,
-		"INTO":     INTO,
-		"VALUES":   VALUES,
-		"ORDER":    ORDER,
-		"BY":       BY,
-		"DISTINCT": DISTINCT,
-		"AST":      ASC,
-		"DESC":     DESC,
-		"LIMIT":    LIMIT,
+		"SELECT":    SELECT,
+		"UPDATE":    UPDATE,
+		"DELETE":    DELETE,
+		"INSERT":    INSERT,
+		"FROM":      FROM,
+		"WHERE":     WHERE,
+		"INTO":      INTO,
+		"VALUES":    VALUES,
+		"ORDER":     ORDER,
+		"BY":        BY,
+		"DISTINCT":  DISTINCT,
+		"AST":       ASC,
+		"DESC":      DESC,
+		"LIMIT":     LIMIT,
+		"CREATE":    CREATE,
+		"TABLE":     TABLE,
+		"TYPE":      TYPE,
+		"BETWEEN":   BETWEEN,
+		"INCREMENT": INCREMENT,
+		"RANDOM":    RANDOM,
+		"OR":        OR,
+		"AND":       AND,
 	}
 	OPTokenMap = map[string]int{
 		"(": LP,
 		")": RP,
 		",": COMMA,
 		".": DOT,
-	}
-	LogicalMap = map[string]int{
-		"OR":  OR,
-		"AND": AND,
 	}
 	ComparisonMap = map[string]int{
 		"=":  EQUAL,
@@ -104,7 +108,7 @@ func (l *Lex) Lex(lval *FunDBSymType) int {
 	}
 
 	for keyword, token := range KeywordTokenMap {
-		if strings.HasPrefix(cur, strings.ToUpper(keyword)) {
+		if strings.HasPrefix(strings.ToUpper(cur), keyword) {
 			lval.tok = l.MkTok(keyword)
 			l.Pos += len(keyword)
 			return token
@@ -120,14 +124,6 @@ func (l *Lex) Lex(lval *FunDBSymType) int {
 	}
 
 	for op, token := range ComparisonMap {
-		if strings.HasPrefix(cur, op) {
-			lval.tok = l.MkTok(op)
-			l.Pos += len(op)
-			return token
-		}
-	}
-
-	for op, token := range LogicalMap {
 		if strings.HasPrefix(cur, op) {
 			lval.tok = l.MkTok(op)
 			l.Pos += len(op)
