@@ -53,6 +53,20 @@ func fetch(engine *core.EngineHandler, sql string) {
 	fmt.Println()
 }
 
+func delete(engine *core.EngineHandler) {
+	fmt.Println("----------------DELETE----------------")
+	deleteQuery := "DELETE FROM test WHERE name = 'hu'"
+	response := engine.Query(deleteQuery)
+	if response.Error != nil {
+		log.Fatalf("Query Error:%s\n", response.Error)
+	}
+	fmt.Printf("SQL : %s\n", deleteQuery)
+	fmt.Printf("Rows Affected: %d\n", response.RowsAffected)
+
+	fmt.Println("----------------DELETE----------------")
+	fmt.Println()
+}
+
 func main() {
 	flag.Parse()
 	engine, err := core.NewEngineHandler("leveldb", "data")
@@ -61,6 +75,7 @@ func main() {
 	}
 	create_table(engine)
 	insert(engine)
+	delete(engine)
 
 	fetchBetweenQuery := "SELECT _id, id, name FROM test WHERE _id between 1 and 3"
 	fetchGreaterQuery := "SELECT _id, id, name FROM test WHERE _id > 2"

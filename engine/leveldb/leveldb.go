@@ -51,7 +51,7 @@ type Field struct {
 
 type TableInfo struct {
 	sync.Mutex
-	columns map[string][]byte
+	fields map[string][]byte
 	*protocol.Table
 }
 
@@ -101,12 +101,12 @@ func (self *LevelDBEngine) initMetaInfo() error {
 					return err
 				}
 				ti := &TableInfo{
-					Table:   table,
-					columns: make(map[string][]byte),
+					Table:  table,
+					fields: make(map[string][]byte),
 				}
 
 				for _, column := range ti.GetColumns() {
-					ti.columns[column] = genereateColumnId(table.GetName(), column)
+					ti.fields[column] = genereateColumnId(table.GetName(), column)
 				}
 				self.schema[table.GetName()] = ti
 				isValid = true
@@ -147,12 +147,12 @@ func (self *LevelDBEngine) updateMeta(table string) error {
 
 func (self *LevelDBEngine) getIdForDBTableColumn(table, column string) ([]byte, error) {
 	if ti, ok := self.schema[table]; ok {
-		if columnId, ok := ti.columns[column]; ok {
+		if columnId, ok := ti.fields[column]; ok {
 			return columnId, nil
 		} else {
 			ti.Columns = append(ti.Columns, column)
 			columnId := genereateColumnId(table, column)
-			ti.columns[column] = columnId
+			ti.fields[column] = columnId
 			if err := self.updateMeta(table); err != nil {
 				return nil, err
 			}
@@ -172,17 +172,17 @@ func (self *LevelDBEngine) CreateTable(table string, idtype parser.TableIdType) 
 	var (
 		records, size int64
 		nextid        int64 = 1
-		columns             = []string{"_id"}
+		fields              = []string{"_id"}
 	)
 	ti := &TableInfo{
-		Table:   &protocol.Table{},
-		columns: make(map[string][]byte),
+		Table:  &protocol.Table{},
+		fields: make(map[string][]byte),
 	}
-	ti.columns["_id"] = genereateColumnId(table, "_id")
+	ti.fields["_id"] = genereateColumnId(table, "_id")
 	ti.Table.Name = &table
 	ti.Table.Records = &records
 	ti.Table.Size = &size
-	ti.Table.Columns = columns
+	ti.Table.Columns = fields
 	if idtype == parser.TABLE_ID_RANDOM {
 		ti.Table.Idtype = ID_RANDOM
 	} else {
@@ -212,11 +212,9 @@ func (self *LevelDBEngine) checkTableExistence(table string) error {
 	return nil
 }
 
-func (self *LevelDBEngine) Insert(recordList *protocol.RecordList) error {
-	if err := self.checkTableExistence(recordList.GetName()); err != nil {
-		return err
-	}
+func (self *LevelDBEngine) insertOrDelete(recordList *protocol.RecordList, isDelete bool, ids []int64) error {
 	var id int64
+
 	size := 0
 	wo := levigo.NewWriteOptions()
 	wb := levigo.NewWriteBatch()
@@ -224,18 +222,25 @@ func (self *LevelDBEngine) Insert(recordList *protocol.RecordList) error {
 	defer wb.Close()
 
 	ti := self.schema[recordList.GetName()]
-	ti.Lock()
-	defer ti.Unlock()
-	for _, record := range recordList.Values {
-		if bytes.Equal(ti.GetIdtype(), ID_RANDOM) {
-			id = rand.Int63n(SEED)
-		} else if bytes.Equal(ti.GetIdtype(), ID_INCREMENT) {
-			id = ti.GetNextid()
+	if bytes.Equal(ti.GetIdtype(), ID_INCREMENT) {
+		ti.Lock()
+		defer ti.Unlock()
+	}
+	for i, record := range recordList.Values {
+		if isDelete {
+			id = ids[i]
+			fmt.Println(id)
 		} else {
-			panic("INVALID Id TYPE")
+			if bytes.Equal(ti.GetIdtype(), ID_RANDOM) {
+				id = rand.Int63n(SEED)
+			} else if bytes.Equal(ti.GetIdtype(), ID_INCREMENT) {
+				id = ti.GetNextid()
+			} else {
+				panic("INVALID Id TYPE")
+			}
 		}
 		for fieldIndex, field := range recordList.Fields {
-			if field == RESERVED_ID_COLUMN {
+			if field == RESERVED_ID_COLUMN && !isDelete {
 				record.Values[fieldIndex].IntVal = &id
 			}
 			columnId, err := self.getIdForDBTableColumn(recordList.GetName(), field)
@@ -245,59 +250,43 @@ func (self *LevelDBEngine) Insert(recordList *protocol.RecordList) error {
 			idBuffer := bytes.NewBuffer(make([]byte, 0, 8))
 			sequenceNumberBuffer := bytes.NewBuffer(make([]byte, 0, 4))
 			binary.Write(idBuffer, binary.BigEndian, id)
-			binary.Write(sequenceNumberBuffer, binary.BigEndian, record.SequenceNum)
-
+			binary.Write(sequenceNumberBuffer, binary.BigEndian, record.GetSequenceNum())
 			recordKey := append(append(columnId, idBuffer.Bytes()...), sequenceNumberBuffer.Bytes()...)
-			glog.V(2).Infof("Insert : %s", record.Values[fieldIndex].String())
-			data, err := proto.Marshal(record.Values[fieldIndex])
-			if err != nil {
-				return err
+
+			if !isDelete {
+				glog.V(2).Infof("Insert : %s, recordKey: %v", record.Values[fieldIndex].String(), recordKey)
+				data, err := proto.Marshal(record.Values[fieldIndex])
+				if err != nil {
+					return err
+				}
+				wb.Put(recordKey, data)
+				size += len(data) + len(recordKey)
+			} else {
+				glog.V(2).Infof("Delete, recordKey : %v", recordKey)
+				wb.Delete(recordKey)
 			}
-			wb.Put(recordKey, data)
-			size += len(data) + len(recordKey)
 		}
-		(*ti.Nextid)++
+		if !isDelete {
+			(*ti.Nextid)++
+		}
 	}
 	if err := self.Write(wo, wb); err != nil {
 		return err
 	}
-	*ti.Size += int64(size)
-	*ti.Records += int64(len(recordList.Values))
+	if !isDelete {
+		*ti.Size += int64(size)
+		*ti.Records += int64(len(recordList.Values))
+	} else {
+		*ti.Size -= int64(size)
+		*ti.Records -= int64(len(recordList.Values))
+	}
 	return self.updateMeta(recordList.GetName())
 }
 
-func (self *LevelDBEngine) getFieldsForTable(table string, columns []string) (fields []*Field, err error) {
-	fields = make([]*Field, 0, len(columns))
-	ti := self.schema[table]
-	for _, column := range columns {
-		if fieldId, ok := ti.columns[column]; ok {
-			field := &Field{
-				Id:   fieldId,
-				Name: column,
-			}
-			fields = append(fields, field)
-		} else {
-			return nil, fmt.Errorf("Unknown column %s", column)
-		}
-	}
-	return fields, nil
-}
-
-func (self *LevelDBEngine) Fetch(query *parser.SelectQuery) (*protocol.RecordList, error) {
-	if err := self.checkTableExistence(query.Table); err != nil {
+func (self *LevelDBEngine) fetch(condition *parser.WhereExpression, table string, fetchFields []string, idStart, idEnd int64, limit int) ([]*protocol.Record, error) {
+	if err := self.checkTableExistence(table); err != nil {
 		return nil, err
 	}
-	expectColumnSet, columns := parser.GetFetchColumns(query)
-	condition, idStart, idEnd, err := parser.GetIdCondition(query.WhereExpression)
-	limit := query.Limit
-	if err != nil {
-		return nil, err
-	}
-	if idStart == parser.InvalidRange {
-		idStart = 0
-	}
-
-	glog.V(1).Infof("table %s, expectedColumns %s, columns %v, start %d, end %d, limit %d", query.Table, expectColumnSet, columns, idStart, idEnd, limit)
 
 	idStartBytesBuffer := bytes.NewBuffer(make([]byte, 0, 8))
 	idEndBytesBuffer := bytes.NewBuffer(make([]byte, 0, 8))
@@ -306,7 +295,7 @@ func (self *LevelDBEngine) Fetch(query *parser.SelectQuery) (*protocol.RecordLis
 	idStartBytes := idStartBytesBuffer.Bytes()
 	idEndBytes := idEndBytesBuffer.Bytes()
 
-	fields, err := self.getFieldsForTable(query.Table, columns)
+	fields, err := self.getFieldsForTable(table, fetchFields)
 	if err != nil {
 		return nil, err
 	}
@@ -368,7 +357,8 @@ func (self *LevelDBEngine) Fetch(query *parser.SelectQuery) (*protocol.RecordLis
 		for i, iterator := range iterators {
 			if rawRecordValues[i] != nil && bytes.Equal(rawRecordValues[i].id, latestIdRaw) &&
 				bytes.Equal(rawRecordValues[i].sequence, latestSequenceRaw) {
-				var id, sequence int64
+				var id int64
+				var sequence uint32
 				isValid = true
 				iterator.Next()
 				fv := &protocol.FieldValue{}
@@ -380,11 +370,10 @@ func (self *LevelDBEngine) Fetch(query *parser.SelectQuery) (*protocol.RecordLis
 				binary.Read(bytes.NewBuffer(rawRecordValues[i].id), binary.BigEndian, &id)
 
 				binary.Read(bytes.NewBuffer(rawRecordValues[i].sequence), binary.BigEndian, &sequence)
-				seq := uint32(sequence)
 
 				record.Values[i] = fv
 				record.Id = &id
-				record.SequenceNum = &seq
+				record.SequenceNum = &sequence
 				rawRecordValues[i] = nil
 			}
 		}
@@ -404,16 +393,112 @@ func (self *LevelDBEngine) Fetch(query *parser.SelectQuery) (*protocol.RecordLis
 			break
 		}
 	}
-	filteredResult, err := filter(records, condition, columns, expectColumnSet)
+
+	glog.Errorf("filtered results = %d", len(records))
+	return filterCondition(records, condition, fetchFields)
+}
+
+func getIdsFromRecords(fields []string, records []*protocol.Record) (res []int64) {
+	res = make([]int64, 0, len(records))
+	idIdx := -1
+	for i, field := range fields {
+		if field == RESERVED_ID_COLUMN {
+			idIdx = i
+		}
+	}
+
+	if idIdx == -1 {
+		panic(fmt.Sprintf("%s NOT FOUND in record list", RESERVED_ID_COLUMN))
+	}
+
+	for _, record := range records {
+		res = append(res, record.Values[idIdx].GetIntVal())
+	}
+	return res
+}
+
+func (self *LevelDBEngine) Insert(recordList *protocol.RecordList) error {
+	return self.insertOrDelete(recordList, false, nil)
+}
+
+func (self *LevelDBEngine) Delete(query *parser.DeleteQuery) (int64, error) {
+	if err := self.checkTableExistence(query.Table); err != nil {
+		return -1, err
+	}
+	condition, idStart, idEnd, err := parser.GetIdCondition(query.WhereExpression)
+	if err != nil {
+		return -1, err
+	}
+
+	fieldSet := parser.GetWhereFields(query.WhereExpression)
+	fieldSet.Insert(RESERVED_ID_COLUMN)
+	fields := fieldSet.ConvertToStrings()
+
+	glog.V(1).Infof("table %s, fields %v, start %d, end %d", query.Table, fields, idStart, idEnd)
+	records, err := self.fetch(condition, query.Table, fields, idStart, idEnd, -1)
+	if err != nil {
+		return -1, err
+	}
+
+	ids := getIdsFromRecords(fields, records)
+
+	// delete all fields
+	ti := self.schema[query.Table]
+	deleteFields := make([]string, 0, len(ti.fields))
+	for field, _ := range ti.fields {
+		deleteFields = append(deleteFields, field)
+	}
+	recordList := &protocol.RecordList{
+		Name:   &query.Table,
+		Fields: deleteFields,
+		Values: records,
+	}
+	if err := self.insertOrDelete(recordList, true, ids); err != nil {
+		return -1, err
+	} else {
+		return int64(len(recordList.Values)), nil
+	}
+}
+
+func (self *LevelDBEngine) getFieldsForTable(table string, fields []string) ([]*Field, error) {
+	res := make([]*Field, 0, len(fields))
+	ti := self.schema[table]
+	for _, field := range fields {
+		if fieldId, ok := ti.fields[field]; ok {
+			f := &Field{
+				Id:   fieldId,
+				Name: field,
+			}
+			res = append(res, f)
+		} else {
+			return nil, fmt.Errorf("Unknown field %s", field)
+		}
+	}
+	return res, nil
+}
+
+func (self *LevelDBEngine) Fetch(query *parser.SelectQuery) (*protocol.RecordList, error) {
+	if err := self.checkTableExistence(query.Table); err != nil {
+		return nil, err
+	}
+	condition, idStart, idEnd, err := parser.GetIdCondition(query.WhereExpression)
+	expectColumnSet, fields := parser.GetAllFields(query)
+
+	glog.V(1).Infof("table %s, expectedColumns %s, fields %v, start %d, end %d, limit %d", query.Table, expectColumnSet, fields, idStart, idEnd, query.Limit)
+
+	records, err := self.fetch(condition, query.Table, fields, idStart, idEnd, query.Limit)
 	if err != nil {
 		return nil, err
 	}
-	result := &protocol.RecordList{
+
+	filteredResult := filterFields(records, fields, expectColumnSet)
+
+	res := &protocol.RecordList{
 		Name:   &query.Table,
 		Fields: expectColumnSet.ConvertToStrings(),
 		Values: filteredResult,
 	}
-	return result, nil
+	return res, nil
 }
 
 func (self *LevelDBEngine) Close() error {

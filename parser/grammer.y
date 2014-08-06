@@ -27,6 +27,7 @@ func (t Token) String() string {
     create_table *CreateTableQuery
     insert_sql  *InsertQuery
     select_statement *SelectQuery
+    delete_statement *DeleteQuery
     selection   *SelectExpression
     column_list *ColumnFields
     value_list  *ValueList
@@ -65,6 +66,7 @@ func (t Token) String() string {
 %type <create_table> create_table_statement
 %type <insert_sql> insert_statement
 %type <select_statement> select_statement
+%type <delete_statement> delete_statement
 %type <ident> table column
 %type <literal> insert_atom literal
 %type <column_list> opt_column_commalist column_commalist
@@ -117,13 +119,21 @@ manipulative_statement:
         insert_statement {
             ParsedQuery = &Query{ QUERY_INSERT, $1}
         }
+    |   delete_statement {
+            ParsedQuery = &Query{ QUERY_DELETE, $1}
+        }
     |   select_statement {
             ParsedQuery = &Query{ QUERY_SELECT, $1}
         }
 
+delete_statement:
+        DELETE table_exp {
+            $$ = &DeleteQuery{$2}
+        }
+
 select_statement:
-        SELECT opt_distinct selection table_exp opt_limit_exp{
-            $$ = &SelectQuery{$2, $3, $4, $5}
+        SELECT opt_distinct selection table_exp opt_order_by_exp opt_limit_exp{
+            $$ = &SelectQuery{$2, $3, $4, $5, $6}
         }
     ;
 
@@ -161,8 +171,8 @@ scalar_exp:
         } 
 
 table_exp: 
-        from_exp opt_where_exp opt_order_by_exp {
-            $$ = &TableExpression{$1, $2, $3}
+        from_exp opt_where_exp {
+            $$ = &TableExpression{$1, $2}
         }
 
 from_exp:

@@ -36,7 +36,6 @@ type WhereExpression struct {
 type TableExpression struct {
 	*FromExpression
 	*WhereExpression
-	*OrderByList
 }
 
 type BetweenExpression struct {

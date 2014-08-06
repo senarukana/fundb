@@ -37,7 +37,12 @@ type SelectQuery struct {
 	Distinct bool
 	*SelectExpression
 	*TableExpression
+	*OrderByList
 	Limit int
+}
+
+type DeleteQuery struct {
+	*TableExpression
 }
 
 type CreateTableQuery struct {

@@ -20,7 +20,7 @@ var (
 func getIdFromBetween(condition *WhereExpression) (int64, int64, error) {
 	field := condition.Left.(string)
 	if field != "_id" {
-		return InvalidRange, InvalidRange, ErrNotIdField
+		return 0, InvalidRange, ErrNotIdField
 	}
 	betweenExpr := condition.Right.(*BetweenExpression)
 	if betweenExpr.Left.Type != SCLAR_LITERAL || betweenExpr.Right.Type != SCLAR_LITERAL {
@@ -43,7 +43,7 @@ func getIdFromBetween(condition *WhereExpression) (int64, int64, error) {
 func getIdFromComparison(condition *WhereExpression) (int64, int64, error) {
 	fieldName := condition.Left.(string)
 	if fieldName != "_id" {
-		return InvalidRange, InvalidRange, ErrNotIdField
+		return 0, InvalidRange, ErrNotIdField
 	}
 	rightScalar := condition.Right.(*Scalar)
 	if rightScalar.Type != SCLAR_LITERAL {
@@ -51,7 +51,7 @@ func getIdFromComparison(condition *WhereExpression) (int64, int64, error) {
 	}
 	rightNode := rightScalar.Val.(LiteralNode)
 	if rightNode.GetType() != protocol.INT {
-		return InvalidRange, InvalidRange, fmt.Errorf("Invalid _id type %v, exptected INT", rightNode.GetType())
+		return 0, InvalidRange, fmt.Errorf("Invalid _id type %v, exptected INT", rightNode.GetType())
 	}
 	val := rightNode.GetVal().GetIntVal()
 	switch ComparisonMap[condition.Token.Src] {
@@ -62,9 +62,9 @@ func getIdFromComparison(condition *WhereExpression) (int64, int64, error) {
 	case GREATEREQ:
 		return val, InvalidRange, nil
 	case SMALLER:
-		return InvalidRange, val - 1, nil
+		return 0, val - 1, nil
 	case SMALLEREQ:
-		return InvalidRange, val, nil
+		return 0, val, nil
 	default:
 		panic("Invalid token type")
 	}
@@ -73,7 +73,7 @@ func getIdFromComparison(condition *WhereExpression) (int64, int64, error) {
 
 func GetIdCondition(condition *WhereExpression) (*WhereExpression, int64, int64, error) {
 	if condition == nil {
-		return nil, InvalidRange, InvalidRange, nil
+		return nil, 0, InvalidRange, nil
 	}
 	switch condition.Type {
 	case WHERE_BETWEEN:
@@ -143,7 +143,7 @@ func GetIdCondition(condition *WhereExpression) (*WhereExpression, int64, int64,
 	panic("shouldn't go here")
 }
 
-func getSelectionColumns(scalarList []*Scalar, columnSet util.StringSet) {
+func getSelectionFields(scalarList []*Scalar, columnSet util.StringSet) {
 	for _, scalar := range scalarList {
 		switch scalar.Type {
 		case SCALAR_IDENT:
@@ -155,14 +155,14 @@ func getSelectionColumns(scalarList []*Scalar, columnSet util.StringSet) {
 	}
 }
 
-func getWhereColumns(condition *WhereExpression, columnSet util.StringSet) {
+func getWhereFields(condition *WhereExpression, columnSet util.StringSet) {
 	if condition == nil {
 		return
 	}
 	switch condition.Type {
 	case WHERE_AND:
-		getWhereColumns(condition.Left.(*WhereExpression), columnSet)
-		getWhereColumns(condition.Right.(*WhereExpression), columnSet)
+		getWhereFields(condition.Left.(*WhereExpression), columnSet)
+		getWhereFields(condition.Right.(*WhereExpression), columnSet)
 	case WHERE_COMPARISON:
 		fieldName := condition.Left.(string)
 		columnSet.Insert(fieldName)
@@ -174,10 +174,16 @@ func getWhereColumns(condition *WhereExpression, columnSet util.StringSet) {
 	}
 }
 
-func GetFetchColumns(query *SelectQuery) (util.StringSet, []string) {
+func GetWhereFields(condition *WhereExpression) util.StringSet {
 	columnSet := util.NewStringSet()
-	getSelectionColumns(query.ScalarList.ScalarList, columnSet)
+	getWhereFields(condition, columnSet)
+	return columnSet
+}
+
+func GetAllFields(query *SelectQuery) (util.StringSet, []string) {
+	columnSet := util.NewStringSet()
+	getSelectionFields(query.ScalarList.ScalarList, columnSet)
 	selectColumns := columnSet.Dup()
-	getWhereColumns(query.WhereExpression, columnSet)
+	getWhereFields(query.WhereExpression, columnSet)
 	return selectColumns, columnSet.ConvertToStrings()
 }

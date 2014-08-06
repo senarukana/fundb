@@ -7,7 +7,7 @@ import (
 	"github.com/senarukana/fundb/protocol"
 	"github.com/senarukana/fundb/util"
 
-	"github.com/golang/glog"
+	// "github.com/golang/glog"
 )
 
 func NewLiteral(field *protocol.FieldValue) parser.LiteralNode {
@@ -82,7 +82,7 @@ func matchComparison(record *protocol.Record, condition *parser.WhereExpression,
 	if err != nil {
 		return false, err
 	}
-	glog.Errorf("left:%v, right:%v\n", leftVal, rightVal)
+	// glog.Errorf("left:%v, right:%v\n", leftVal, rightVal)
 	return leftVal.Compare(parser.ComparisonMap[condition.Token.Src], rightVal), nil
 }
 
@@ -124,7 +124,7 @@ func match(record *protocol.Record, condition *parser.WhereExpression, fields []
 	panic("shouldn't go here")
 }
 
-func filterColumns(records []*protocol.Record, fields []string, expectedFieldSet util.StringSet) []*protocol.Record {
+func filterFields(records []*protocol.Record, fields []string, expectedFieldSet util.StringSet) []*protocol.Record {
 	for _, record := range records {
 		newValues := make([]*protocol.FieldValue, 0, len(expectedFieldSet))
 		for i, field := range fields {
@@ -138,12 +138,10 @@ func filterColumns(records []*protocol.Record, fields []string, expectedFieldSet
 	return records
 }
 
-func filter(records []*protocol.Record, condition *parser.WhereExpression, fields []string, expectedFieldSet util.StringSet) ([]*protocol.Record, error) {
+func filterCondition(records []*protocol.Record, condition *parser.WhereExpression, fields []string) ([]*protocol.Record, error) {
 	if condition == nil {
-		glog.Errorln("fuck")
-		return filterColumns(records, fields, expectedFieldSet), nil
+		return records, nil
 	} else {
-		glog.Errorln("filter!!")
 		var res []*protocol.Record
 		for _, record := range records {
 			matched, err := match(record, condition, fields)
@@ -154,6 +152,6 @@ func filter(records []*protocol.Record, condition *parser.WhereExpression, field
 				res = append(res, record)
 			}
 		}
-		return filterColumns(res, fields, expectedFieldSet), nil
+		return res, nil
 	}
 }

@@ -42,6 +42,8 @@ func (self *EngineHandler) Query(sql string) *Response {
 		return self.craeteTable(query.Query.(*parser.CreateTableQuery))
 	case parser.QUERY_INSERT:
 		return self.insert(query.Query.(*parser.InsertQuery))
+	case parser.QUERY_DELETE:
+		return self.delete(query.Query.(*parser.DeleteQuery))
 	case parser.QUERY_SELECT:
 		return self.fetch(query.Query.(*parser.SelectQuery))
 	default:
@@ -128,6 +130,19 @@ func (self *EngineHandler) insert(query *parser.InsertQuery) *Response {
 	} else {
 		return &Response{
 			RowsAffected: uint64(len(query.ValueList.Values)),
+		}
+	}
+}
+
+func (self *EngineHandler) delete(query *parser.DeleteQuery) *Response {
+	rowsAffected, err := self.Delete(query)
+	if err != nil {
+		return &Response{
+			Error: err,
+		}
+	} else {
+		return &Response{
+			RowsAffected: uint64(rowsAffected),
 		}
 	}
 }
