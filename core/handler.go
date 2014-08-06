@@ -88,7 +88,7 @@ func (self *EngineHandler) appendIdIfNeeded(query *parser.InsertQuery) {
 	if !foundId {
 		query.Fields = append(query.Fields, reserverdIdColumn)
 		for _, valueItems := range query.Values {
-			dummyIdField := &protocol.FieldValue{}
+			dummyIdField := &parser.NullNode{protocol.NULL, new(protocol.FieldValue)}
 			valueItems.Items = append(valueItems.Items, dummyIdField)
 		}
 	}
@@ -110,7 +110,10 @@ func (self *EngineHandler) insert(query *parser.InsertQuery) *Response {
 			sn := self.currentSequenceNumber
 			record := &protocol.Record{
 				SequenceNum: &sn,
-				Values:      valueItems.Items,
+				Values:      make([]*protocol.FieldValue, 0, len(valueItems.Items)),
+			}
+			for _, item := range valueItems.Items {
+				record.Values = append(record.Values, item.GetVal())
 			}
 			self.currentSequenceNumber++
 			recordList.Values = append(recordList.Values, record)
@@ -130,15 +133,7 @@ func (self *EngineHandler) insert(query *parser.InsertQuery) *Response {
 }
 
 func (self *EngineHandler) fetch(query *parser.SelectQuery) *Response {
-	var resultList *protocol.RecordList
-	columns := getFetchColumns(query)
-	condition, idStart, idEnd, err := getIdCondition(query.WhereExpression)
-	if err == nil {
-		if idStart == InvalidInt {
-			idStart = 0
-		}
-		resultList, err = self.Fetch(query.Table, columns, idStart, idEnd, condition, query.Limit)
-	}
+	resultList, err := self.Fetch(query)
 
 	if err != nil {
 		return &Response{

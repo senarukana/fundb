@@ -65,9 +65,13 @@ func main() {
 	fetchBetweenQuery := "SELECT _id, id, name FROM test WHERE _id between 1 and 3"
 	fetchGreaterQuery := "SELECT _id, id, name FROM test WHERE _id > 2"
 	fetchSmallerQuery := "SELECT _id, id, name FROM test WHERE _id < 2"
-	fetchEqualQuery := "SELECT _id, id, name FROM test WHERE _id = 2"
+	fetchEqualQuery := "SELECT id, name FROM test WHERE _id = 2"
+	fetchAllQuery := "SELECT id, name FROM test"
+	fetchAndNameQuery := "SELECT id, name FROM test WHERE name = 'li'"
 	fetch(engine, fetchBetweenQuery)
 	fetch(engine, fetchGreaterQuery)
 	fetch(engine, fetchSmallerQuery)
 	fetch(engine, fetchEqualQuery)
+	fetch(engine, fetchAllQuery)
+	fetch(engine, fetchAndNameQuery)
 }

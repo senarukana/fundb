@@ -1,7 +1,7 @@
 #!/bin/sh
-rm -rf data/
+rm -rf data/*
 cd protocol
-./build
+./build.sh
 cd ..
 
 cd parser

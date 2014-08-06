@@ -1,5 +1,9 @@
 package util
 
+import (
+	"fmt"
+)
+
 type StringSet map[string]bool
 
 func NewStringSet() StringSet {
@@ -20,10 +24,27 @@ func (s StringSet) Exists(str string) bool {
 	}
 }
 
+func (s StringSet) Dup() StringSet {
+	cs := NewStringSet()
+	for str, _ := range s {
+		cs.Insert(str)
+	}
+	return cs
+}
+
 func (s StringSet) ConvertToStrings() []string {
 	res := make([]string, 0, len(s))
-	for s, _ := range s {
-		res = append(res, s)
+	for str, _ := range s {
+		res = append(res, str)
 	}
+	return res
+}
+
+func (s StringSet) String() string {
+	res := fmt.Sprint("StringSet: [ ")
+	for str, _ := range s {
+		res += fmt.Sprint(str + " ")
+	}
+	res += fmt.Sprintln("]")
 	return res
 }

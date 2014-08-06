@@ -1,10 +1,7 @@
 package parser
 
 import (
-	"fmt"
-	"strconv"
-
-	"github.com/senarukana/fundb/protocol"
+// "fmt"
 )
 
 type ScalarType int
@@ -75,7 +72,7 @@ type OrderBy struct {
 }
 
 type ValueItems struct {
-	Items []*protocol.FieldValue
+	Items []LiteralNode
 }
 
 type ValueList struct {
@@ -140,36 +137,13 @@ func ColumnFieldsAppend(columnFields *ColumnFields, field string) *ColumnFields 
 	return columnFields
 }
 
-func NewFieldValue(fieldType protocol.FieldType, src string) *protocol.FieldValue {
-	field := &protocol.FieldValue{}
-	switch fieldType {
-	case protocol.INT:
-		val, _ := strconv.ParseInt(src, 10, 64)
-		field.IntVal = &val
-	case protocol.DOUBLE:
-		val, _ := strconv.ParseFloat(src, 64)
-		field.DoubleVal = &val
-	case protocol.BOOL:
-		val, _ := strconv.ParseBool(src)
-		field.BoolVal = &val
-	case protocol.STRING:
-		field.StrVal = &src
-	case protocol.NULL:
-		empty := ""
-		field.StrVal = &empty
-	default:
-		panic(fmt.Errorf("Invalid field type"))
-	}
-	return field
-}
-
-func NewValueItem(item *protocol.FieldValue) *ValueItems {
+func NewValueItem(item LiteralNode) *ValueItems {
 	return &ValueItems{
-		Items: []*protocol.FieldValue{item},
+		Items: []LiteralNode{item},
 	}
 }
 
-func ValueItemAppend(valueItems *ValueItems, item *protocol.FieldValue) *ValueItems {
+func ValueItemAppend(valueItems *ValueItems, item LiteralNode) *ValueItems {
 	if valueItems == nil {
 		return NewValueItem(item)
 	}

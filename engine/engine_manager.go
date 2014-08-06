@@ -2,13 +2,16 @@ package engine
 
 import (
 	"os"
+
+	abstract "github.com/senarukana/fundb/engine/interface"
+	"github.com/senarukana/fundb/engine/leveldb"
 )
 
 var (
 	defaultDirPerm os.FileMode = 0755
 )
 
-type engineNewFunc func() storeEngine
+type engineNewFunc func() abstract.StoreEngine
 
 var engineImpls = make(map[string]engineNewFunc)
 
@@ -17,7 +20,7 @@ func register(name string, engineInit engineNewFunc) {
 }
 
 type EngineManager struct {
-	storeEngine
+	abstract.StoreEngine
 	engineName string
 	dataPath   string
 }
@@ -34,7 +37,7 @@ func NewEngineManager(engineName, dataPath string) (*EngineManager, error) {
 			return nil, err
 		}
 		engine := &EngineManager{
-			storeEngine: eng,
+			StoreEngine: eng,
 			engineName:  engineName,
 			dataPath:    dataPath,
 		}
@@ -57,5 +60,5 @@ func (engine *EngineManager) Close() error {
 }
 
 func init() {
-	register("leveldb", NewLevelDBEngine)
+	register("leveldb", leveldb.NewLevelDBEngine)
 }

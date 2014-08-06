@@ -1,4 +1,4 @@
-package engine
+package leveldb
 
 import (
 	"bytes"
@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"sync"
 
+	abstract "github.com/senarukana/fundb/engine/interface"
 	"github.com/senarukana/fundb/parser"
 	"github.com/senarukana/fundb/protocol"
 
@@ -60,7 +61,7 @@ type LevelDBEngine struct {
 	schema map[string]*TableInfo
 }
 
-func NewLevelDBEngine() storeEngine {
+func NewLevelDBEngine() abstract.StoreEngine {
 	leveldbEngine := new(LevelDBEngine)
 	return leveldbEngine
 }
@@ -282,12 +283,21 @@ func (self *LevelDBEngine) getFieldsForTable(table string, columns []string) (fi
 	return fields, nil
 }
 
-func (self *LevelDBEngine) Fetch(table string, columns []string,
-	idStart, idEnd int64, whereExpr *parser.WhereExpression, limit int) (*protocol.RecordList, error) {
-	if err := self.checkTableExistence(table); err != nil {
+func (self *LevelDBEngine) Fetch(query *parser.SelectQuery) (*protocol.RecordList, error) {
+	if err := self.checkTableExistence(query.Table); err != nil {
 		return nil, err
 	}
-	glog.V(1).Infof("table %s, columns %v, start %d, end %d, limit %d", table, columns, idStart, idEnd, limit)
+	expectColumnSet, columns := parser.GetFetchColumns(query)
+	condition, idStart, idEnd, err := parser.GetIdCondition(query.WhereExpression)
+	limit := query.Limit
+	if err != nil {
+		return nil, err
+	}
+	if idStart == parser.InvalidRange {
+		idStart = 0
+	}
+
+	glog.V(1).Infof("table %s, expectedColumns %s, columns %v, start %d, end %d, limit %d", query.Table, expectColumnSet, columns, idStart, idEnd, limit)
 
 	idStartBytesBuffer := bytes.NewBuffer(make([]byte, 0, 8))
 	idEndBytesBuffer := bytes.NewBuffer(make([]byte, 0, 8))
@@ -296,7 +306,7 @@ func (self *LevelDBEngine) Fetch(table string, columns []string,
 	idStartBytes := idStartBytesBuffer.Bytes()
 	idEndBytes := idEndBytesBuffer.Bytes()
 
-	fields, err := self.getFieldsForTable(table, columns)
+	fields, err := self.getFieldsForTable(query.Table, columns)
 	if err != nil {
 		return nil, err
 	}
@@ -315,7 +325,7 @@ func (self *LevelDBEngine) Fetch(table string, columns []string,
 		iterators[i].Seek(append(field.Id, idStartBytes...))
 	}
 
-	result := &protocol.RecordList{Name: &table, Fields: fieldNames, Values: make([]*protocol.Record, 0)}
+	var records []*protocol.Record
 	rawRecordValues := make([]*rawRecordValue, fieldCount, fieldCount)
 	isValid := true
 
@@ -373,13 +383,14 @@ func (self *LevelDBEngine) Fetch(table string, columns []string,
 				seq := uint32(sequence)
 
 				record.Values[i] = fv
+				record.Id = &id
 				record.SequenceNum = &seq
 				rawRecordValues[i] = nil
 			}
 		}
 		if isValid {
 			limit--
-			result.Values = append(result.Values, record)
+			records = append(records, record)
 
 			// add byte count for the timestamp and the sequence
 			resultByteCount += 16
@@ -393,7 +404,15 @@ func (self *LevelDBEngine) Fetch(table string, columns []string,
 			break
 		}
 	}
-	// filteredResult, _ := Filter(whereExpr, result)
+	filteredResult, err := filter(records, condition, columns, expectColumnSet)
+	if err != nil {
+		return nil, err
+	}
+	result := &protocol.RecordList{
+		Name:   &query.Table,
+		Fields: expectColumnSet.ConvertToStrings(),
+		Values: filteredResult,
+	}
 	return result, nil
 }
 

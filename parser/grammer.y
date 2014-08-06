@@ -23,7 +23,7 @@ func (t Token) String() string {
 %union {
     sql         *Query
     ident       string
-    literal     *protocol.FieldValue
+    literal     LiteralNode
     create_table *CreateTableQuery
     insert_sql  *InsertQuery
     select_statement *SelectQuery
@@ -309,7 +309,7 @@ insert_atom:
             $$ = $1
         }
     |   NULLX {
-            $$ = NewFieldValue(protocol.NULL, "")
+            $$ = NewLiteral(protocol.NULL, "")
         }
 
 column:     
@@ -324,16 +324,16 @@ table:
 
 literal:
         STRING {
-            $$ = NewFieldValue(protocol.STRING, $1.Src)
+            $$ = NewLiteral(protocol.STRING, $1.Src)
         }
     |   INT {
-            $$ = NewFieldValue(protocol.INT, $1.Src)
+            $$ = NewLiteral(protocol.INT, $1.Src)
         }
     |   DOUBLE {
-            $$ = NewFieldValue(protocol.DOUBLE, $1.Src)
+            $$ = NewLiteral(protocol.DOUBLE, $1.Src)
         }
     |   BOOL {
-            $$ = NewFieldValue(protocol.BOOL, $1.Src)
+            $$ = NewLiteral(protocol.BOOL, $1.Src)
         }
 
 %%

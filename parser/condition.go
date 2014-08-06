@@ -1,10 +1,10 @@
-package core
+package parser
 
 import (
+	"errors"
 	"fmt"
 	"math"
 
-	"github.com/senarukana/fundb/parser"
 	"github.com/senarukana/fundb/protocol"
 	"github.com/senarukana/fundb/util"
 )
@@ -13,17 +13,21 @@ const (
 	InvalidRange int64 = math.MaxInt64
 )
 
-func getIdFromBetween(condition *parser.WhereExpression) (int64, int64, error) {
+var (
+	ErrNotIdField = errors.New("not it field")
+)
+
+func getIdFromBetween(condition *WhereExpression) (int64, int64, error) {
 	field := condition.Left.(string)
 	if field != "_id" {
-		return InvalidRange, InvalidRange, nil
+		return InvalidRange, InvalidRange, ErrNotIdField
 	}
-	betweenExpr := condition.Right.(*parser.BetweenExpression)
-	if betweenExpr.Left.Type != parser.SCLAR_LITERAL || betweenExpr.Right.Type != parser.SCLAR_LITERAL {
+	betweenExpr := condition.Right.(*BetweenExpression)
+	if betweenExpr.Left.Type != SCLAR_LITERAL || betweenExpr.Right.Type != SCLAR_LITERAL {
 		panic("NOT SUPPORTED SCALAR TYPE")
 	}
-	leftField := betweenExpr.Left.Val.(parser.LiteralNode)
-	rightField := betweenExpr.Right.Val.(parser.LiteralNode)
+	leftField := betweenExpr.Left.Val.(LiteralNode)
+	rightField := betweenExpr.Right.Val.(LiteralNode)
 
 	if leftField.GetType() != protocol.INT || rightField.GetType() != protocol.INT {
 		return InvalidRange, InvalidRange, fmt.Errorf("Invalid _id type %v, exptected INT", leftField.GetType())
@@ -36,30 +40,30 @@ func getIdFromBetween(condition *parser.WhereExpression) (int64, int64, error) {
 	return idStart, idEnd - 1, nil
 }
 
-func getIdFromComparison(condition *parser.WhereExpression) (int64, int64, error) {
+func getIdFromComparison(condition *WhereExpression) (int64, int64, error) {
 	fieldName := condition.Left.(string)
 	if fieldName != "_id" {
-		return InvalidRange, InvalidRange, nil
+		return InvalidRange, InvalidRange, ErrNotIdField
 	}
-	rightScalar := condition.Right.(*parser.Scalar)
-	if rightScalar.Type != parser.SCLAR_LITERAL {
+	rightScalar := condition.Right.(*Scalar)
+	if rightScalar.Type != SCLAR_LITERAL {
 		panic("NOT SUPPORTED SCALAR TYPE")
 	}
-	rightNode := rightScalar.Val.(parser.LiteralNode)
+	rightNode := rightScalar.Val.(LiteralNode)
 	if rightNode.GetType() != protocol.INT {
 		return InvalidRange, InvalidRange, fmt.Errorf("Invalid _id type %v, exptected INT", rightNode.GetType())
 	}
 	val := rightNode.GetVal().GetIntVal()
-	switch parser.ComparisonMap[condition.Token.Src] {
-	case parser.EQUAL:
+	switch ComparisonMap[condition.Token.Src] {
+	case EQUAL:
 		return val, val, nil
-	case parser.GREATER:
+	case GREATER:
 		return val + 1, InvalidRange, nil
-	case parser.GREATEREQ:
+	case GREATEREQ:
 		return val, InvalidRange, nil
-	case parser.SMALLER:
+	case SMALLER:
 		return InvalidRange, val - 1, nil
-	case parser.SMALLEREQ:
+	case SMALLEREQ:
 		return InvalidRange, val, nil
 	default:
 		panic("Invalid token type")
@@ -67,23 +71,32 @@ func getIdFromComparison(condition *parser.WhereExpression) (int64, int64, error
 	panic("shouldn't go here")
 }
 
-func getIdCondition(condition *parser.WhereExpression) (*parser.WhereExpression, int64, int64, error) {
+func GetIdCondition(condition *WhereExpression) (*WhereExpression, int64, int64, error) {
 	if condition == nil {
 		return nil, InvalidRange, InvalidRange, nil
 	}
 	switch condition.Type {
-	case parser.WHERE_BETWEEN:
+	case WHERE_BETWEEN:
 		idStart, idEnd, err := getIdFromBetween(condition)
-		return nil, idStart, idEnd, err
-	case parser.WHERE_COMPARISON:
+		if err == ErrNotIdField {
+			return condition, idStart, idEnd, nil
+		} else {
+			return nil, idStart, idEnd, err
+		}
+	case WHERE_COMPARISON:
 		idStart, idEnd, err := getIdFromComparison(condition)
+		if err == ErrNotIdField {
+			return condition, idStart, idEnd, nil
+		} else {
+			return nil, idStart, idEnd, err
+		}
 		return nil, idStart, idEnd, err
-	case parser.WHERE_AND:
-		leftCondition, leftStart, leftEnd, err := getIdCondition(condition.Left.(*parser.WhereExpression))
+	case WHERE_AND:
+		leftCondition, leftStart, leftEnd, err := GetIdCondition(condition.Left.(*WhereExpression))
 		if err != nil {
 			return nil, InvalidRange, InvalidRange, err
 		}
-		rightCondition, rightStart, rightEnd, err := getIdCondition(condition.Right.(*parser.WhereExpression))
+		rightCondition, rightStart, rightEnd, err := GetIdCondition(condition.Right.(*WhereExpression))
 		if err != nil {
 			return nil, InvalidRange, InvalidRange, err
 		}
@@ -130,10 +143,10 @@ func getIdCondition(condition *parser.WhereExpression) (*parser.WhereExpression,
 	panic("shouldn't go here")
 }
 
-func getSelectionColumns(scalarList []*parser.Scalar, columnSet util.StringSet) {
+func getSelectionColumns(scalarList []*Scalar, columnSet util.StringSet) {
 	for _, scalar := range scalarList {
 		switch scalar.Type {
-		case parser.SCALAR_IDENT:
+		case SCALAR_IDENT:
 			ident := scalar.Val.(string)
 			columnSet.Insert(ident)
 		default:
@@ -142,18 +155,18 @@ func getSelectionColumns(scalarList []*parser.Scalar, columnSet util.StringSet) 
 	}
 }
 
-func getWhereColumns(condition *parser.WhereExpression, columnSet util.StringSet) {
+func getWhereColumns(condition *WhereExpression, columnSet util.StringSet) {
 	if condition == nil {
 		return
 	}
 	switch condition.Type {
-	case parser.WHERE_AND:
-		getWhereColumns(condition.Left.(*parser.WhereExpression), columnSet)
-		getWhereColumns(condition.Right.(*parser.WhereExpression), columnSet)
-	case parser.WHERE_COMPARISON:
+	case WHERE_AND:
+		getWhereColumns(condition.Left.(*WhereExpression), columnSet)
+		getWhereColumns(condition.Right.(*WhereExpression), columnSet)
+	case WHERE_COMPARISON:
 		fieldName := condition.Left.(string)
 		columnSet.Insert(fieldName)
-	case parser.WHERE_BETWEEN:
+	case WHERE_BETWEEN:
 		fieldName := condition.Left.(string)
 		columnSet.Insert(fieldName)
 	default:
@@ -161,10 +174,10 @@ func getWhereColumns(condition *parser.WhereExpression, columnSet util.StringSet
 	}
 }
 
-func getFetchColumns(query *parser.SelectQuery) ([]string, []string) {
+func GetFetchColumns(query *SelectQuery) (util.StringSet, []string) {
 	columnSet := util.NewStringSet()
 	getSelectionColumns(query.ScalarList.ScalarList, columnSet)
-	selectColumns := columnSet.ConvertToStrings()
+	selectColumns := columnSet.Dup()
 	getWhereColumns(query.WhereExpression, columnSet)
 	return selectColumns, columnSet.ConvertToStrings()
 }
