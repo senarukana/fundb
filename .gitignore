@@ -1,5 +1,6 @@
 fundb
 data/*
+test/data/*
 .DS_Store
 *.output
 grammer.go
