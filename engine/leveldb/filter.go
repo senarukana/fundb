@@ -124,11 +124,12 @@ func match(record *protocol.Record, condition *parser.WhereExpression, fields []
 	panic("shouldn't go here")
 }
 
-func filterFields(records []*protocol.Record, fields []string, expectedFieldSet util.StringSet) []*protocol.Record {
+func filterFields(records []*protocol.Record, selectFields, fetchFields []string) []*protocol.Record {
 	for _, record := range records {
-		newValues := make([]*protocol.FieldValue, 0, len(expectedFieldSet))
-		for i, field := range fields {
-			if !expectedFieldSet.Exists(field) {
+		newValues := make([]*protocol.FieldValue, 0, len(selectFields))
+		selectFieldSet := util.NewStringSetFromStrings(selectFields)
+		for i, field := range fetchFields {
+			if !selectFieldSet.Exists(field) {
 				continue
 			}
 			newValues = append(newValues, record.Values[i])

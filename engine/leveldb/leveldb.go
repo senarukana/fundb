@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"hash/fnv"
 	"math/rand"
 	"sync"
 
@@ -50,7 +49,7 @@ type Field struct {
 }
 
 type TableInfo struct {
-	sync.Mutex
+	sync.RWMutex
 	fields map[string][]byte
 	*protocol.Table
 }
@@ -64,20 +63,6 @@ type LevelDBEngine struct {
 func NewLevelDBEngine() abstract.StoreEngine {
 	leveldbEngine := new(LevelDBEngine)
 	return leveldbEngine
-}
-
-func genereateColumnId(table, column string) []byte {
-	h := fnv.New64()
-	b := []byte(fmt.Sprintf("%s%c%s", table, SEPERATOR, column))
-	idBuffer := bytes.NewBuffer(make([]byte, 0, 8))
-	h.Write(b)
-	val := h.Sum64()
-	binary.Write(idBuffer, binary.BigEndian, val)
-	return idBuffer.Bytes()
-}
-
-func genereateMetaTableKey(table string) []byte {
-	return []byte(table)
 }
 
 func (self *LevelDBEngine) initMetaInfo() error {
@@ -398,25 +383,6 @@ func (self *LevelDBEngine) fetch(condition *parser.WhereExpression, table string
 	return filterCondition(records, condition, fetchFields)
 }
 
-func getIdsFromRecords(fields []string, records []*protocol.Record) (res []int64) {
-	res = make([]int64, 0, len(records))
-	idIdx := -1
-	for i, field := range fields {
-		if field == RESERVED_ID_COLUMN {
-			idIdx = i
-		}
-	}
-
-	if idIdx == -1 {
-		panic(fmt.Sprintf("%s NOT FOUND in record list", RESERVED_ID_COLUMN))
-	}
-
-	for _, record := range records {
-		res = append(res, record.Values[idIdx].GetIntVal())
-	}
-	return res
-}
-
 func (self *LevelDBEngine) Insert(recordList *protocol.RecordList) error {
 	return self.insertOrDelete(recordList, false, nil)
 }
@@ -430,9 +396,13 @@ func (self *LevelDBEngine) Delete(query *parser.DeleteQuery) (int64, error) {
 		return -1, err
 	}
 
-	fieldSet := parser.GetWhereFields(query.WhereExpression)
-	fieldSet.Insert(RESERVED_ID_COLUMN)
-	fields := fieldSet.ConvertToStrings()
+	// TODO: Make it in parser
+	if query.WhereExpression == nil {
+		return -1, fmt.Errorf("NO WHERE EXPRESSION IN DELETE")
+	}
+
+	conditionFields := query.WhereExpression.GetConditionFields()
+	fields := appendReversedIdFieldsIfNeeded(conditionFields)
 
 	glog.V(1).Infof("table %s, fields %v, start %d, end %d", query.Table, fields, idStart, idEnd)
 	records, err := self.fetch(condition, query.Table, fields, idStart, idEnd, -1)
@@ -477,25 +447,48 @@ func (self *LevelDBEngine) getFieldsForTable(table string, fields []string) ([]*
 	return res, nil
 }
 
+func (self *LevelDBEngine) checkFieldsStar(table string, selectFields []string) ([]string, error) {
+	for _, field := range selectFields {
+		if field == "*" {
+			if len(selectFields) != 1 {
+				return nil, fmt.Errorf("* should only be appreared alone in select fields")
+			}
+			ti := self.schema[table]
+			ti.RLock()
+			defer ti.RUnlock()
+			res := make([]string, 0, len(ti.fields))
+			for field, _ := range ti.fields {
+				res = append(res, field)
+			}
+			return res, nil
+		}
+	}
+	return selectFields, nil
+}
+
 func (self *LevelDBEngine) Fetch(query *parser.SelectQuery) (*protocol.RecordList, error) {
 	if err := self.checkTableExistence(query.Table); err != nil {
 		return nil, err
 	}
 	condition, idStart, idEnd, err := parser.GetIdCondition(query.WhereExpression)
-	expectColumnSet, fields := parser.GetAllFields(query)
-
-	glog.V(1).Infof("table %s, expectedColumns %s, fields %v, start %d, end %d, limit %d", query.Table, expectColumnSet, fields, idStart, idEnd, query.Limit)
-
-	records, err := self.fetch(condition, query.Table, fields, idStart, idEnd, query.Limit)
+	fetchFields := query.GetSelectAndConditionFields()
+	selectFields, err := self.checkFieldsStar(query.Table, query.GetSelectFields())
 	if err != nil {
 		return nil, err
 	}
 
-	filteredResult := filterFields(records, fields, expectColumnSet)
+	glog.V(1).Infof("table %s, selectFields %v, fetchFields %v, start %d, end %d, limit %d", query.Table, selectFields, fetchFields, idStart, idEnd, query.Limit)
+
+	records, err := self.fetch(condition, query.Table, fetchFields, idStart, idEnd, query.Limit)
+	if err != nil {
+		return nil, err
+	}
+
+	filteredResult := filterFields(records, selectFields, fetchFields)
 
 	res := &protocol.RecordList{
 		Name:   &query.Table,
-		Fields: expectColumnSet.ConvertToStrings(),
+		Fields: selectFields,
 		Values: filteredResult,
 	}
 	return res, nil

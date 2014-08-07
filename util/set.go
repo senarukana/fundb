@@ -10,6 +10,14 @@ func NewStringSet() StringSet {
 	return make(map[string]bool)
 }
 
+func NewStringSetFromStrings(strs []string) StringSet {
+	s := NewStringSet()
+	for _, str := range strs {
+		s.Insert(str)
+	}
+	return s
+}
+
 func (s StringSet) Insert(str string) {
 	if _, ok := s[str]; !ok {
 		s[str] = true

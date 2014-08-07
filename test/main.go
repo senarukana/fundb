@@ -3,9 +3,17 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"log"
+	"strings"
 
 	"github.com/senarukana/fundb/core"
+)
+
+const (
+	insertFileName = "insert.sql"
+	deleteFileName = "delete.sql"
+	selectFileName = "select.sql"
 )
 
 func create_table(engine *core.EngineHandler) {
@@ -16,17 +24,20 @@ func create_table(engine *core.EngineHandler) {
 	}
 }
 
-func insert(engine *core.EngineHandler) {
-	insertQuery := "INSERT INTO test (id, name, age) VALUES (1, 'li', 25), (2, 'ted', 25)"
-	insertQuery2 := "INSERT INTO test (id, name, age) VALUES (3, 'hu', 25), (4, 'zheng', 25)"
-	response := engine.Query(insertQuery)
-	if response.Error != nil {
-		log.Fatalf("Query Error:%s\n", response.Error)
+func insertTest(engine *core.EngineHandler) {
+	contents, err := ioutil.ReadFile(insertFileName)
+	if err != nil {
+		log.Panic(fmt.Sprintf("read insert sql file: %s error: %s", insertFileName, err.Error()))
 	}
-
-	response = engine.Query(insertQuery2)
-	if response.Error != nil {
-		log.Fatalf("Query Error:%s\n", response.Error)
+	insertSqls := strings.Split(string(contents), "\n")
+	for _, insertSql := range insertSqls {
+		if insertSql == "" {
+			continue
+		}
+		response := engine.Query(insertSql)
+		if response.Error != nil {
+			log.Fatalf("Query Error:%s\n", response.Error)
+		}
 	}
 }
 
@@ -74,19 +85,8 @@ func main() {
 		log.Fatalln(err)
 	}
 	create_table(engine)
-	insert(engine)
-	delete(engine)
+	insertTest(engine)
 
-	fetchBetweenQuery := "SELECT _id, id, name FROM test WHERE _id between 1 and 3"
-	fetchGreaterQuery := "SELECT _id, id, name FROM test WHERE _id > 2"
-	fetchSmallerQuery := "SELECT _id, id, name FROM test WHERE _id < 2"
-	fetchEqualQuery := "SELECT id, name FROM test WHERE _id = 2"
-	fetchAllQuery := "SELECT id, name FROM test"
-	fetchAndNameQuery := "SELECT id, name FROM test WHERE name = 'li'"
-	fetch(engine, fetchBetweenQuery)
-	fetch(engine, fetchGreaterQuery)
-	fetch(engine, fetchSmallerQuery)
-	fetch(engine, fetchEqualQuery)
-	fetch(engine, fetchAllQuery)
-	fetch(engine, fetchAndNameQuery)
+	selectAll := "select * from test"
+	fetch(engine, selectAll)
 }
