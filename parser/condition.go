@@ -182,12 +182,12 @@ func (self *SelectQuery) GetSelectAndConditionFields() []string {
 	if self.WhereExpression != nil {
 		self.WhereExpression.getConditionFields(columnSet)
 	}
-	self.GetSelectFields()
+	self.getSelectFields(columnSet)
 	return columnSet.ConvertToStrings()
 }
 
 func (self *SelectQuery) GetSelectFields() []string {
 	columnSet := util.NewStringSet()
-	self.GetSelectFields()
+	self.getSelectFields(columnSet)
 	return columnSet.ConvertToStrings()
 }

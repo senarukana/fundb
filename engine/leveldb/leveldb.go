@@ -472,6 +472,7 @@ func (self *LevelDBEngine) Fetch(query *parser.SelectQuery) (*protocol.RecordLis
 	}
 	condition, idStart, idEnd, err := parser.GetIdCondition(query.WhereExpression)
 	fetchFields := query.GetSelectAndConditionFields()
+	glog.V(2).Infoln("check star")
 	selectFields, err := self.checkFieldsStar(query.Table, query.GetSelectFields())
 	if err != nil {
 		return nil, err

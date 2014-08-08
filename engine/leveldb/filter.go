@@ -125,9 +125,9 @@ func match(record *protocol.Record, condition *parser.WhereExpression, fields []
 }
 
 func filterFields(records []*protocol.Record, selectFields, fetchFields []string) []*protocol.Record {
+	selectFieldSet := util.NewStringSetFromStrings(selectFields)
 	for _, record := range records {
 		newValues := make([]*protocol.FieldValue, 0, len(selectFields))
-		selectFieldSet := util.NewStringSetFromStrings(selectFields)
 		for i, field := range fetchFields {
 			if !selectFieldSet.Exists(field) {
 				continue
