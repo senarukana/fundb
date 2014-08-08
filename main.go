@@ -19,6 +19,7 @@ func create_table(engine *core.EngineHandler) {
 func insert(engine *core.EngineHandler) {
 	insertQuery := "INSERT INTO test (id, name, age) VALUES (1, 'li', 25), (2, 'ted', 25)"
 	insertQuery2 := "INSERT INTO test (id, name, age) VALUES (3, 'hu', 25), (4, 'zheng', 25)"
+	// insertQuery3 := "INSERT INTO test (id, name, age, info) VALUES (5, 'coppola', 25, 'student in bupt')"
 	response := engine.Query(insertQuery)
 	if response.Error != nil {
 		log.Fatalf("Query Error:%s\n", response.Error)
@@ -28,6 +29,11 @@ func insert(engine *core.EngineHandler) {
 	if response.Error != nil {
 		log.Fatalf("Query Error:%s\n", response.Error)
 	}
+
+	// response = engine.Query(insertQuery3)
+	// if response.Error != nil {
+	// 	log.Fatalf("Query Error:%s\n", response.Error)
+	// }
 }
 
 func fetch(engine *core.EngineHandler, sql string) {
@@ -77,16 +83,16 @@ func main() {
 	insert(engine)
 	delete(engine)
 
-	fetchBetweenQuery := "SELECT _id, id, name FROM test WHERE _id between 1 and 3"
-	fetchGreaterQuery := "SELECT _id, id, name FROM test WHERE _id > 2"
-	fetchSmallerQuery := "SELECT _id, id, name FROM test WHERE _id < 2"
-	fetchEqualQuery := "SELECT id, name FROM test WHERE _id = 2"
-	fetchAllQuery := "SELECT id, name FROM test"
-	fetchAndNameQuery := "SELECT id, name FROM test WHERE name = 'li'"
-	fetch(engine, fetchBetweenQuery)
-	fetch(engine, fetchGreaterQuery)
-	fetch(engine, fetchSmallerQuery)
-	fetch(engine, fetchEqualQuery)
-	fetch(engine, fetchAllQuery)
+	// fetchBetweenQuery := "SELECT _id, id, name from test WHERE _id between 1 and 3"
+	// fetchGreaterQuery := "SELECT _id, id, name FROM test WHERE _id > 2"
+	// fetchSmallerQuery := "SELECT _id, id, name FROM test WHERE _id < 2"
+	// fetchEqualQuery := "SELECT id, name FROM test WHERE _id = 2"
+	// fetchAllQuery := "SELECT id, name FROM test"
+	fetchAndNameQuery := "SELECT * FROM test WHERE name = 'hu'"
+	// fetch(engine, fetchBetweenQuery)
+	// fetch(engine, fetchGreaterQuery)
+	// fetch(engine, fetchSmallerQuery)
+	// fetch(engine, fetchEqualQuery)
+	// fetch(engine, fetchAllQuery)
 	fetch(engine, fetchAndNameQuery)
 }

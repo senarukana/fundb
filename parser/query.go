@@ -15,6 +15,23 @@ const (
 	QUERY_SCHEMA_TABLE_CREATE
 )
 
+func (self QueryType) String() string {
+	switch self {
+	case QUERY_SELECT:
+		return "QUERY_SELECT"
+	case QUERY_DELETE:
+		return "QUERY_DELETE"
+	case QUERY_INSERT:
+		return "QUERY_INSERT"
+	case QUERY_UPDATE:
+		return "QUERY_UPDATE"
+	case QUERY_SCHEMA_TABLE_CREATE:
+		return "QUERY_SCHEMA_TABLE_CREATE"
+	default:
+		return "INVALID"
+	}
+}
+
 type ParserError struct {
 	Message string
 }

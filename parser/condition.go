@@ -160,6 +160,9 @@ func (self *WhereExpression) getConditionFields(columnSet util.StringSet) {
 }
 
 func (self *SelectQuery) getSelectFields(columnSet util.StringSet) {
+	if self.ScalarList == nil {
+		return
+	}
 	for _, scalar := range self.ScalarList.ScalarList {
 		switch scalar.Type {
 		case SCALAR_IDENT:

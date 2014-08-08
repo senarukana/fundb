@@ -7,7 +7,7 @@ import (
 	"github.com/senarukana/fundb/protocol"
 	"github.com/senarukana/fundb/util"
 
-	// "github.com/golang/glog"
+	"github.com/golang/glog"
 )
 
 func NewLiteral(field *protocol.FieldValue) parser.LiteralNode {
@@ -140,11 +140,15 @@ func filterFields(records []*protocol.Record, selectFields, fetchFields []string
 }
 
 func filterCondition(records []*protocol.Record, condition *parser.WhereExpression, fields []string) ([]*protocol.Record, error) {
+
 	if condition == nil {
 		return records, nil
 	} else {
 		var res []*protocol.Record
 		for _, record := range records {
+			for _, value := range record.GetValues() {
+				glog.Errorln(value.String())
+			}
 			matched, err := match(record, condition, fields)
 			if err != nil {
 				return nil, err

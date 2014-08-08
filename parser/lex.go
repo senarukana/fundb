@@ -42,6 +42,7 @@ var (
 		")": RP,
 		",": COMMA,
 		".": DOT,
+		"*": STAR,
 	}
 	ComparisonMap = map[string]int{
 		"=":  EQUAL,

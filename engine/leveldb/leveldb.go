@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/rand"
-	"sync"
 
 	abstract "github.com/senarukana/fundb/engine/interface"
 	"github.com/senarukana/fundb/parser"
@@ -43,21 +42,9 @@ type rawRecordValue struct {
 	value    []byte
 }
 
-type Field struct {
-	Name string
-	Id   []byte
-}
-
-type TableInfo struct {
-	sync.RWMutex
-	fields map[string][]byte
-	*protocol.Table
-}
-
 type LevelDBEngine struct {
 	*levigo.DB
-	sync.Mutex
-	schema map[string]*TableInfo
+	schema *schema
 }
 
 func NewLevelDBEngine() abstract.StoreEngine {
@@ -66,7 +53,7 @@ func NewLevelDBEngine() abstract.StoreEngine {
 }
 
 func (self *LevelDBEngine) initMetaInfo() error {
-	self.schema = make(map[string]*TableInfo)
+	self.schema = newSchema()
 
 	ro := levigo.NewReadOptions()
 	it := self.NewIterator(ro)
@@ -85,15 +72,12 @@ func (self *LevelDBEngine) initMetaInfo() error {
 				if err := proto.Unmarshal(it.Value(), table); err != nil {
 					return err
 				}
-				ti := &TableInfo{
-					Table:  table,
-					fields: make(map[string][]byte),
-				}
+				ti := newTableInfo(table)
 
-				for _, column := range ti.GetColumns() {
-					ti.fields[column] = genereateColumnId(table.GetName(), column)
+				for _, column := range table.GetColumns() {
+					ti.InsertField(column)
 				}
-				self.schema[table.GetName()] = ti
+				self.schema.Insert(table.GetName(), ti)
 				isValid = true
 
 				glog.V(2).Infoln(table)
@@ -120,8 +104,9 @@ func (self *LevelDBEngine) Init(dataPath string) (err error) {
 }
 
 func (self *LevelDBEngine) updateMeta(table string) error {
-	ti := self.schema[table]
+	ti := self.schema.GetTableInfo(table)
 	wo := levigo.NewWriteOptions()
+	wo.SetSync(true)
 	key := append(LEVELDB_META_PREFIX, genereateMetaTableKey(table)...)
 	val, err := proto.Marshal(ti.Table)
 	if err != nil {
@@ -130,70 +115,37 @@ func (self *LevelDBEngine) updateMeta(table string) error {
 	return self.Put(wo, key, val)
 }
 
-func (self *LevelDBEngine) getIdForDBTableColumn(table, column string) ([]byte, error) {
-	if ti, ok := self.schema[table]; ok {
-		if columnId, ok := ti.fields[column]; ok {
-			return columnId, nil
-		} else {
-			ti.Columns = append(ti.Columns, column)
-			columnId := genereateColumnId(table, column)
-			ti.fields[column] = columnId
-			if err := self.updateMeta(table); err != nil {
-				return nil, err
-			}
-			glog.V(3).Infof("Create new column %s\n", column)
-			return columnId, nil
-		}
-	} else {
-		return nil, fmt.Errorf("Table %s not existed", table)
-	}
-}
-
 func (self *LevelDBEngine) CreateTable(table string, idtype parser.TableIdType) error {
-	if _, ok := self.schema[table]; ok {
+	if self.schema.GetTableInfo(table) != nil {
 		return fmt.Errorf("Table %s already existed", table)
 	}
 
 	var (
 		records, size int64
 		nextid        int64 = 1
-		fields              = []string{"_id"}
+		fields              = []string{RESERVED_ID_COLUMN}
 	)
-	ti := &TableInfo{
-		Table:  &protocol.Table{},
-		fields: make(map[string][]byte),
+	pt := &protocol.Table{
+		Name:    &table,
+		Records: &records,
+		Size:    &size,
+		Columns: fields,
 	}
-	ti.fields["_id"] = genereateColumnId(table, "_id")
-	ti.Table.Name = &table
-	ti.Table.Records = &records
-	ti.Table.Size = &size
-	ti.Table.Columns = fields
 	if idtype == parser.TABLE_ID_RANDOM {
-		ti.Table.Idtype = ID_RANDOM
+		pt.Idtype = ID_RANDOM
 	} else {
-		ti.Table.Idtype = ID_INCREMENT
-		ti.Table.Nextid = &nextid
+		pt.Idtype = ID_INCREMENT
+		pt.Nextid = &nextid
 	}
-	tableKey := append(LEVELDB_META_PREFIX, []byte(table)...)
-	wo := levigo.NewWriteOptions()
-	wo.SetSync(true)
-	val, err := proto.Marshal(ti.Table)
-	if err == nil {
-		if err = self.Put(wo, tableKey, val); err != nil {
-			return err
-		}
-	}
-	if err == nil {
-		self.schema[table] = ti
+	ti := newTableInfo(pt)
+	ti.InsertField(RESERVED_ID_COLUMN)
+
+	if err := ti.SyncToDB(self); err != nil {
+		return err
 	}
 
-	return err
-}
-
-func (self *LevelDBEngine) checkTableExistence(table string) error {
-	if _, ok := self.schema[table]; !ok {
-		return fmt.Errorf("Table %s not existed", table)
-	}
+	self.schema.Insert(table, ti)
+	glog.V(2).Infof("Create Table %s complete", table)
 	return nil
 }
 
@@ -206,7 +158,10 @@ func (self *LevelDBEngine) insertOrDelete(recordList *protocol.RecordList, isDel
 	defer wo.Close()
 	defer wb.Close()
 
-	ti := self.schema[recordList.GetName()]
+	ti := self.schema.GetTableInfo(recordList.GetName())
+	if ti == nil {
+		return fmt.Errorf("Table %s not existed", recordList.GetName())
+	}
 	if bytes.Equal(ti.GetIdtype(), ID_INCREMENT) {
 		ti.Lock()
 		defer ti.Unlock()
@@ -228,10 +183,7 @@ func (self *LevelDBEngine) insertOrDelete(recordList *protocol.RecordList, isDel
 			if field == RESERVED_ID_COLUMN && !isDelete {
 				record.Values[fieldIndex].IntVal = &id
 			}
-			columnId, err := self.getIdForDBTableColumn(recordList.GetName(), field)
-			if err != nil {
-				return err
-			}
+			columnId := ti.GetFieldValAndUpdateNoLock(field)
 			idBuffer := bytes.NewBuffer(make([]byte, 0, 8))
 			sequenceNumberBuffer := bytes.NewBuffer(make([]byte, 0, 4))
 			binary.Write(idBuffer, binary.BigEndian, id)
@@ -258,6 +210,9 @@ func (self *LevelDBEngine) insertOrDelete(recordList *protocol.RecordList, isDel
 	if err := self.Write(wo, wb); err != nil {
 		return err
 	}
+	if err := ti.SyncToDB(self); err != nil {
+		return err
+	}
 	if !isDelete {
 		*ti.Size += int64(size)
 		*ti.Records += int64(len(recordList.Values))
@@ -268,9 +223,9 @@ func (self *LevelDBEngine) insertOrDelete(recordList *protocol.RecordList, isDel
 	return self.updateMeta(recordList.GetName())
 }
 
-func (self *LevelDBEngine) fetch(condition *parser.WhereExpression, table string, fetchFields []string, idStart, idEnd int64, limit int) ([]*protocol.Record, error) {
-	if err := self.checkTableExistence(table); err != nil {
-		return nil, err
+func (self *LevelDBEngine) fetch(condition *parser.WhereExpression, tableName string, fetchFields []string, idStart, idEnd int64, limit int) ([]*protocol.Record, error) {
+	if !self.schema.Exist(tableName) {
+		return nil, fmt.Errorf("Table %s not existed", tableName)
 	}
 
 	idStartBytesBuffer := bytes.NewBuffer(make([]byte, 0, 8))
@@ -280,23 +235,21 @@ func (self *LevelDBEngine) fetch(condition *parser.WhereExpression, table string
 	idStartBytes := idStartBytesBuffer.Bytes()
 	idEndBytes := idEndBytesBuffer.Bytes()
 
-	fields, err := self.getFieldsForTable(table, fetchFields)
+	ti := self.schema.GetTableInfo(tableName)
+	fieldPairs, err := ti.GetFieldPairs(fetchFields)
 	if err != nil {
 		return nil, err
 	}
-	fieldCount := len(fields)
-	prefixes := make([][]byte, fieldCount, fieldCount)
+	fieldCount := len(fieldPairs)
 	iterators := make([]*levigo.Iterator, fieldCount, fieldCount)
-	fieldNames := make([]string, len(fields))
 
 	// start the iterators to go through the series data
-	for i, field := range fields {
-		fieldNames[i] = field.Name
-		prefixes[i] = field.Id
+	for i, fieldPair := range fieldPairs {
 		ro := levigo.NewReadOptions()
 		defer ro.Close()
 		iterators[i] = self.NewIterator(ro)
-		iterators[i].Seek(append(field.Id, idStartBytes...))
+		iterators[i].Seek(append(fieldPair.Id, idStartBytes...))
+		defer iterators[i].Close()
 	}
 
 	var records []*protocol.Record
@@ -320,8 +273,8 @@ func (self *LevelDBEngine) fetch(condition *parser.WhereExpression, table string
 				if len(key) >= 16 {
 					// check id is between idStart and idEnd
 					id := key[8:16]
-					glog.V(2).Infof("id %v, start %v, end %v", id, idStartBytes, idEndBytes)
-					if bytes.Equal(key[:8], fields[i].Id) && bytes.Compare(id, idStartBytes) > -1 && bytes.Compare(id, idEndBytes) < 1 {
+					glog.V(2).Infof("fieldId: %v, key %v, start %v, end %v", fieldPairs[i].Id, it.Key(), idStartBytes, idEndBytes)
+					if bytes.Equal(key[:8], fieldPairs[i].Id) && bytes.Compare(id, idStartBytes) > -1 && bytes.Compare(id, idEndBytes) < 1 {
 						v := it.Value()
 						s := key[16:]
 						rawRecordValues[i] = &rawRecordValue{id: id, sequence: s, value: v}
@@ -388,8 +341,9 @@ func (self *LevelDBEngine) Insert(recordList *protocol.RecordList) error {
 }
 
 func (self *LevelDBEngine) Delete(query *parser.DeleteQuery) (int64, error) {
-	if err := self.checkTableExistence(query.Table); err != nil {
-		return -1, err
+	ti := self.schema.GetTableInfo(query.Table)
+	if ti == nil {
+		return -1, fmt.Errorf("Table %s not existed", query.Table)
 	}
 	condition, idStart, idEnd, err := parser.GetIdCondition(query.WhereExpression)
 	if err != nil {
@@ -413,11 +367,7 @@ func (self *LevelDBEngine) Delete(query *parser.DeleteQuery) (int64, error) {
 	ids := getIdsFromRecords(fields, records)
 
 	// delete all fields
-	ti := self.schema[query.Table]
-	deleteFields := make([]string, 0, len(ti.fields))
-	for field, _ := range ti.fields {
-		deleteFields = append(deleteFields, field)
-	}
+	deleteFields := ti.GetAllFields()
 	recordList := &protocol.RecordList{
 		Name:   &query.Table,
 		Fields: deleteFields,
@@ -430,53 +380,21 @@ func (self *LevelDBEngine) Delete(query *parser.DeleteQuery) (int64, error) {
 	}
 }
 
-func (self *LevelDBEngine) getFieldsForTable(table string, fields []string) ([]*Field, error) {
-	res := make([]*Field, 0, len(fields))
-	ti := self.schema[table]
-	for _, field := range fields {
-		if fieldId, ok := ti.fields[field]; ok {
-			f := &Field{
-				Id:   fieldId,
-				Name: field,
-			}
-			res = append(res, f)
-		} else {
-			return nil, fmt.Errorf("Unknown field %s", field)
-		}
+func (self *LevelDBEngine) getSelectAndFetchFields(query *parser.SelectQuery) ([]string, []string) {
+	if !query.IsStar {
+		return query.GetSelectFields(), query.GetSelectAndConditionFields()
 	}
-	return res, nil
-}
-
-func (self *LevelDBEngine) checkFieldsStar(table string, selectFields []string) ([]string, error) {
-	for _, field := range selectFields {
-		if field == "*" {
-			if len(selectFields) != 1 {
-				return nil, fmt.Errorf("* should only be appreared alone in select fields")
-			}
-			ti := self.schema[table]
-			ti.RLock()
-			defer ti.RUnlock()
-			res := make([]string, 0, len(ti.fields))
-			for field, _ := range ti.fields {
-				res = append(res, field)
-			}
-			return res, nil
-		}
-	}
-	return selectFields, nil
+	ti := self.schema.GetTableInfo(query.Table)
+	allFields := ti.GetAllFields()
+	return allFields, allFields
 }
 
 func (self *LevelDBEngine) Fetch(query *parser.SelectQuery) (*protocol.RecordList, error) {
-	if err := self.checkTableExistence(query.Table); err != nil {
-		return nil, err
+	if !self.schema.Exist(query.Table) {
+		return nil, fmt.Errorf("Table %s not existed", query.Table)
 	}
 	condition, idStart, idEnd, err := parser.GetIdCondition(query.WhereExpression)
-	fetchFields := query.GetSelectAndConditionFields()
-	glog.V(2).Infoln("check star")
-	selectFields, err := self.checkFieldsStar(query.Table, query.GetSelectFields())
-	if err != nil {
-		return nil, err
-	}
+	selectFields, fetchFields := self.getSelectAndFetchFields(query)
 
 	glog.V(1).Infof("table %s, selectFields %v, fetchFields %v, start %d, end %d, limit %d", query.Table, selectFields, fetchFields, idStart, idEnd, query.Limit)
 
