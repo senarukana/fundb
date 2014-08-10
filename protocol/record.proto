@@ -6,6 +6,7 @@ message Record {
     repeated FieldValue values = 1;
     required int64 id = 2;
     required uint32 sequenceNum = 3;
+    required int64 timestamp = 4;
 }
 
 message RecordList {

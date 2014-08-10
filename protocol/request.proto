@@ -1,0 +1,15 @@
+package protocol;
+
+message Request {
+    enum Type {
+        WRITE = 1;
+        QUERY = 2;
+        HEARTBEAT = 3;
+    }
+    optional uint32 id = 1;
+    required Type type = 2;
+    required int32 RequestNum = 3;
+    required int32 ShardId = 4;
+    required uint32 SequenceNum = 5;
+    optional string query = 6;
+}

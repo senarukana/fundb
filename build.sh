@@ -9,7 +9,6 @@ make
 cd ..
 
 go build
-go install
 
-cd test
-go build
+# cd test
+# go build

@@ -29,21 +29,14 @@ func newTableInfo(table *protocol.Table) *tableInfo {
 }
 
 func (self *tableInfo) InsertField(field string) {
-	// self.Lock()
-	// defer self.Unlock()
 	self.fields[field] = genereateColumnId(self.Table.GetName(), field)
 }
 
-func (self *tableInfo) InsertFieldNoLock(field string) {
-	self.fields[field] = genereateColumnId(self.Table.GetName(), field)
-}
-
-func (self *tableInfo) GetFieldValAndUpdateNoLock(field string) []byte {
+func (self *tableInfo) GetFieldValAndUpdate(field string) []byte {
 	if val, ok := self.fields[field]; ok {
 		return val
 	} else {
-		// new field update it
-		self.InsertFieldNoLock(field)
+		self.InsertField(field)
 		return self.fields[field]
 	}
 }

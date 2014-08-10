@@ -9,6 +9,41 @@ import (
 	"github.com/senarukana/fundb/protocol"
 )
 
+type rawRecordValue struct {
+	*recordKey
+	value []byte
+}
+
+type recordKey struct {
+	key []byte
+}
+
+func newRecordKey(key []byte) *recordKey {
+	return &recordKey{
+		key: key,
+	}
+}
+
+func (r *recordKey) getFieldId() []byte {
+	return r.key[0:8]
+}
+
+func (r *recordKey) getId() []byte {
+	return r.key[8:16]
+}
+
+func (r *recordKey) getTimestamp() []byte {
+	return r.key[16:24]
+}
+
+func (r *recordKey) getSequenceNum() []byte {
+	return r.key[24:]
+}
+
+func getIdFromKey(key []byte) []byte {
+	return key[8:16]
+}
+
 func genereateColumnId(table, column string) []byte {
 	h := fnv.New64()
 	b := []byte(fmt.Sprintf("%s%c%s", table, SEPERATOR, column))

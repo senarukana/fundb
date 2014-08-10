@@ -36,12 +36,6 @@ var (
 	ID_RANDOM    = []byte{0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01}
 )
 
-type rawRecordValue struct {
-	id       []byte
-	sequence []byte
-	value    []byte
-}
-
 type LevelDBEngine struct {
 	*levigo.DB
 	schema *schema
@@ -162,14 +156,10 @@ func (self *LevelDBEngine) insertOrDelete(recordList *protocol.RecordList, isDel
 	if ti == nil {
 		return fmt.Errorf("Table %s not existed", recordList.GetName())
 	}
-	if bytes.Equal(ti.GetIdtype(), ID_INCREMENT) {
-		ti.Lock()
-		defer ti.Unlock()
-	}
+
 	for i, record := range recordList.Values {
 		if isDelete {
 			id = ids[i]
-			fmt.Println(id)
 		} else {
 			if bytes.Equal(ti.GetIdtype(), ID_RANDOM) {
 				id = rand.Int63n(SEED)
@@ -183,12 +173,14 @@ func (self *LevelDBEngine) insertOrDelete(recordList *protocol.RecordList, isDel
 			if field == RESERVED_ID_COLUMN && !isDelete {
 				record.Values[fieldIndex].IntVal = &id
 			}
-			columnId := ti.GetFieldValAndUpdateNoLock(field)
+			columnId := ti.GetFieldValAndUpdate(field)
 			idBuffer := bytes.NewBuffer(make([]byte, 0, 8))
+			tsBuffer := bytes.NewBuffer(make([]byte, 0, 8))
 			sequenceNumberBuffer := bytes.NewBuffer(make([]byte, 0, 4))
 			binary.Write(idBuffer, binary.BigEndian, id)
+			binary.Write(tsBuffer, binary.BigEndian, record.GetTimestamp())
 			binary.Write(sequenceNumberBuffer, binary.BigEndian, record.GetSequenceNum())
-			recordKey := append(append(columnId, idBuffer.Bytes()...), sequenceNumberBuffer.Bytes()...)
+			recordKey := append(append(columnId, idBuffer.Bytes()...), append(tsBuffer.Bytes(), sequenceNumberBuffer.Bytes()...)...)
 
 			if !isDelete {
 				glog.V(2).Infof("Insert : %s, recordKey: %v", record.Values[fieldIndex].String(), recordKey)
@@ -210,9 +202,6 @@ func (self *LevelDBEngine) insertOrDelete(recordList *protocol.RecordList, isDel
 	if err := self.Write(wo, wb); err != nil {
 		return err
 	}
-	if err := ti.SyncToDB(self); err != nil {
-		return err
-	}
 	if !isDelete {
 		*ti.Size += int64(size)
 		*ti.Records += int64(len(recordList.Values))
@@ -220,7 +209,44 @@ func (self *LevelDBEngine) insertOrDelete(recordList *protocol.RecordList, isDel
 		*ti.Size -= int64(size)
 		*ti.Records -= int64(len(recordList.Values))
 	}
+	if err := ti.SyncToDB(self); err != nil {
+		return err
+	}
 	return self.updateMeta(recordList.GetName())
+}
+
+func (self *LevelDBEngine) deleteObsoleteRecord(iterators []*levigo.Iterator, recordId []byte) error {
+	wo := levigo.NewWriteOptions()
+	wb := levigo.NewWriteBatch()
+
+	defer wo.Close()
+	defer wb.Close()
+	// move all iterator with earliestId to the latest timestamp
+	for _, it := range iterators {
+		var prevKey []byte
+		advanced := false
+		for it.Valid() {
+			key := it.Key()
+			if bytes.Compare(recordId, getIdFromKey(key)) != 0 {
+				break
+			}
+			if prevKey != nil {
+				glog.V(2).Infof("Delete obsolete record: key %v", prevKey)
+				wb.Delete(prevKey)
+			}
+			prevKey = key
+			it.Next()
+			advanced = true
+		}
+		if advanced {
+			if it.Valid() {
+				it.Prev()
+			} else {
+				it.SeekToLast()
+			}
+		}
+	}
+	return self.Write(wo, wb)
 }
 
 func (self *LevelDBEngine) fetch(condition *parser.WhereExpression, tableName string, fetchFields []string, idStart, idEnd int64, limit int) ([]*protocol.Record, error) {
@@ -264,53 +290,53 @@ func (self *LevelDBEngine) fetch(condition *parser.WhereExpression, tableName st
 
 	for isValid {
 		isValid = false
-		latestIdRaw := make([]byte, 8, 8)
-		latestSequenceRaw := make([]byte, 8, 8)
+		var earliestId []byte
 		record := &protocol.Record{Values: make([]*protocol.FieldValue, fieldCount, fieldCount)}
 		for i, it := range iterators {
 			if rawRecordValues[i] == nil && it.Valid() {
-				key := it.Key()
-				if len(key) >= 16 {
+				recordKey := newRecordKey(it.Key())
+				if len(recordKey.key) >= 28 {
 					// check id is between idStart and idEnd
-					id := key[8:16]
 					glog.V(2).Infof("fieldId: %v, key %v, start %v, end %v", fieldPairs[i].Id, it.Key(), idStartBytes, idEndBytes)
-					if bytes.Equal(key[:8], fieldPairs[i].Id) && bytes.Compare(id, idStartBytes) > -1 && bytes.Compare(id, idEndBytes) < 1 {
+					if bytes.Equal(recordKey.getFieldId(), fieldPairs[i].Id) &&
+						bytes.Compare(recordKey.getId(), idStartBytes) > -1 && bytes.Compare(recordKey.getId(), idEndBytes) < 1 {
 						v := it.Value()
-						s := key[16:]
-						rawRecordValues[i] = &rawRecordValue{id: id, sequence: s, value: v}
-						idCompare := bytes.Compare(id, latestIdRaw)
-						if idCompare == 1 {
-							latestIdRaw = id
-							latestSequenceRaw = s
-						} else if idCompare == 0 {
-							if bytes.Compare(s, latestSequenceRaw) == 1 {
-								latestSequenceRaw = s
-							}
+						rawRecordValues[i] = &rawRecordValue{recordKey: recordKey, value: v}
+						idCompare := bytes.Compare(recordKey.getId(), earliestId)
+
+						// find the earliest id
+						if earliestId == nil || idCompare < 0 {
+							earliestId = recordKey.getId()
 						}
 					}
 				}
 			}
 		}
+		// move all iterator with earliestId to the newest record and delete the obsolete record
+		err := self.deleteObsoleteRecord(iterators, earliestId)
+		if err != nil {
+			return nil, err
+		}
 
-		for i, iterator := range iterators {
-			if rawRecordValues[i] != nil && bytes.Equal(rawRecordValues[i].id, latestIdRaw) &&
-				bytes.Equal(rawRecordValues[i].sequence, latestSequenceRaw) {
-				var id int64
+		for i, it := range iterators {
+			if it.Valid() && rawRecordValues[i] != nil && bytes.Equal(rawRecordValues[i].getId(), earliestId) {
+				var id, ts int64
 				var sequence uint32
 				isValid = true
-				iterator.Next()
+				it.Next()
 				fv := &protocol.FieldValue{}
 				err := proto.Unmarshal(rawRecordValues[i].value, fv)
 				if err != nil {
 					return nil, err
 				}
 				resultByteCount += len(rawRecordValues[i].value)
-				binary.Read(bytes.NewBuffer(rawRecordValues[i].id), binary.BigEndian, &id)
-
-				binary.Read(bytes.NewBuffer(rawRecordValues[i].sequence), binary.BigEndian, &sequence)
+				binary.Read(bytes.NewBuffer(rawRecordValues[i].getId()), binary.BigEndian, &id)
+				binary.Read(bytes.NewBuffer(rawRecordValues[i].getTimestamp()), binary.BigEndian, &ts)
+				binary.Read(bytes.NewBuffer(rawRecordValues[i].getSequenceNum()), binary.BigEndian, &sequence)
 
 				record.Values[i] = fv
 				record.Id = &id
+				record.Timestamp = &ts
 				record.SequenceNum = &sequence
 				rawRecordValues[i] = nil
 			}

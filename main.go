@@ -81,7 +81,7 @@ func main() {
 	}
 	create_table(engine)
 	insert(engine)
-	delete(engine)
+	// delete(engine)
 
 	// fetchBetweenQuery := "SELECT _id, id, name from test WHERE _id between 1 and 3"
 	// fetchGreaterQuery := "SELECT _id, id, name FROM test WHERE _id > 2"

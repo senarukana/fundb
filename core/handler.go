@@ -3,6 +3,7 @@ package core
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/senarukana/fundb/engine"
 	"github.com/senarukana/fundb/parser"
@@ -108,10 +109,12 @@ func (self *EngineHandler) insert(query *parser.InsertQuery) *Response {
 		self.sequenceNumberLock.Lock()
 		defer self.sequenceNumberLock.Unlock()
 
+		ts := time.Now().UnixNano()
 		for _, valueItems := range query.Values {
 			sn := self.currentSequenceNumber
 			record := &protocol.Record{
 				SequenceNum: &sn,
+				Timestamp:   &ts,
 				Values:      make([]*protocol.FieldValue, 0, len(valueItems.Items)),
 			}
 			for _, item := range valueItems.Items {
