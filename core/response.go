@@ -5,7 +5,7 @@ import (
 )
 
 type Response struct {
-	Error        error
+	Error        string
 	RowsAffected uint64
 	Results      *protocol.RecordList
 }

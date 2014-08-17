@@ -8,6 +8,8 @@ import (
 	"github.com/senarukana/fundb/engine"
 	"github.com/senarukana/fundb/parser"
 	"github.com/senarukana/fundb/protocol"
+
+	"github.com/golang/glog"
 )
 
 const (
@@ -31,13 +33,14 @@ func NewEngineHandler(engineName, dataPath string) (*EngineHandler, error) {
 	}, nil
 }
 
-func (self *EngineHandler) Query(sql string) *Response {
+func (self *EngineHandler) Query(db string, sql string) *Response {
 	query, err := parser.ParseQuery(sql)
 	if err != nil {
 		return &Response{
-			Error: err,
+			Error: err.Error(),
 		}
 	}
+	glog.V(2).Infof("Query: %s\n", sql)
 	switch query.Type {
 	case parser.QUERY_SCHEMA_TABLE_CREATE:
 		return self.craeteTable(query.Query.(*parser.CreateTableQuery))
@@ -74,8 +77,13 @@ func (self *EngineHandler) validInsertQuery(query *parser.InsertQuery) error {
 }
 
 func (self *EngineHandler) craeteTable(query *parser.CreateTableQuery) *Response {
-	return &Response{
-		Error: self.CreateTable(query.Name, query.Type),
+	err := self.CreateTable(query.Name, query.Type)
+	if err != nil {
+		return &Response{
+			Error: err.Error(),
+		}
+	} else {
+		return &Response{}
 	}
 }
 
@@ -128,7 +136,7 @@ func (self *EngineHandler) insert(query *parser.InsertQuery) *Response {
 
 	if err != nil {
 		return &Response{
-			Error: err,
+			Error: err.Error(),
 		}
 	} else {
 		return &Response{
@@ -141,7 +149,7 @@ func (self *EngineHandler) delete(query *parser.DeleteQuery) *Response {
 	rowsAffected, err := self.Delete(query)
 	if err != nil {
 		return &Response{
-			Error: err,
+			Error: err.Error(),
 		}
 	} else {
 		return &Response{
@@ -150,17 +158,39 @@ func (self *EngineHandler) delete(query *parser.DeleteQuery) *Response {
 	}
 }
 
-func (self *EngineHandler) fetch(query *parser.SelectQuery) *Response {
-	resultList, err := self.Fetch(query)
+func prettyPrintResponse(response *Response) {
+	fmt.Printf("Rows Affected: %d\n", response.RowsAffected)
+	fmt.Printf("Table: %s\n", response.Results.GetName())
+	for _, field := range response.Results.Fields {
+		fmt.Printf("%s\t\t", field)
+	}
+	fmt.Println()
+	for _, record := range response.Results.GetValues() {
+		for _, item := range record.GetValues() {
+			fmt.Print(item.String() + "\t")
+		}
+		fmt.Println()
+	}
+	fmt.Println()
+}
 
+func (self *EngineHandler) fetch(query *parser.SelectQuery) *Response {
+
+	resultList, err := self.Fetch(query)
+	if resultList != nil {
+		glog.Errorln(resultList.Fields)
+	}
 	if err != nil {
 		return &Response{
-			Error: err,
+			Error: err.Error(),
 		}
 	} else {
-		return &Response{
+		glog.Errorln("!!!")
+		res := &Response{
 			RowsAffected: uint64(len(resultList.Values)),
 			Results:      resultList,
 		}
+		prettyPrintResponse(res)
+		return res
 	}
 }
