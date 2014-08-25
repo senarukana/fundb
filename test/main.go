@@ -16,7 +16,7 @@ const (
 	selectFileName = "select.sql"
 )
 
-func create_table(engine *core.EngineHandler) {
+func create_table(engine *core.QueryEngine) {
 	createQuery := "CREATE TABLE test INCREMENT"
 	response := engine.Query(createQuery)
 	if response.Error != nil {
@@ -24,7 +24,7 @@ func create_table(engine *core.EngineHandler) {
 	}
 }
 
-func insertTest(engine *core.EngineHandler) {
+func insertTest(engine *core.QueryEngine) {
 	contents, err := ioutil.ReadFile(insertFileName)
 	if err != nil {
 		log.Panic(fmt.Sprintf("read insert sql file: %s error: %s", insertFileName, err.Error()))
@@ -41,7 +41,7 @@ func insertTest(engine *core.EngineHandler) {
 	}
 }
 
-func fetch(engine *core.EngineHandler, sql string) {
+func fetch(engine *core.QueryEngine, sql string) {
 
 	response := engine.Query(sql)
 
@@ -64,7 +64,7 @@ func fetch(engine *core.EngineHandler, sql string) {
 	fmt.Println()
 }
 
-func delete(engine *core.EngineHandler) {
+func delete(engine *core.QueryEngine) {
 	fmt.Println("----------------DELETE----------------")
 	deleteQuery := "DELETE FROM test WHERE name = 'li'"
 	response := engine.Query(deleteQuery)
@@ -80,7 +80,7 @@ func delete(engine *core.EngineHandler) {
 
 func main() {
 	flag.Parse()
-	engine, err := core.NewEngineHandler("leveldb", "data")
+	engine, err := core.NewQueryEngine("leveldb", "data")
 	if err != nil {
 		log.Fatalln(err)
 	}

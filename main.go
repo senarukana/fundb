@@ -18,7 +18,7 @@ func main() {
 	rand.Seed(time.Now().UTC().UnixNano())
 	flag.Parse()
 
-	handler, err := core.NewEngineHandler("leveldb", "data")
+	handler, err := core.NewQueryEngine("leveldb", "data")
 	if err != nil {
 		log.Fatalln(err)
 	}

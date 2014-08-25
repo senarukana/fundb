@@ -42,8 +42,6 @@ func (self *tableInfo) GetFieldValAndUpdate(field string) []byte {
 }
 
 func (self *tableInfo) GetAllFields() []string {
-	self.RLock()
-	defer self.RUnlock()
 	res := make([]string, 0, len(self.fields))
 	for field, _ := range self.fields {
 		res = append(res, field)
@@ -52,8 +50,6 @@ func (self *tableInfo) GetAllFields() []string {
 }
 
 func (self *tableInfo) GetAllFieldPairs() []*FieldPair {
-	self.RLock()
-	defer self.RUnlock()
 	res := make([]*FieldPair, 0, len(self.fields))
 	for field, fieldId := range self.fields {
 		fieldPair := &FieldPair{
@@ -66,8 +62,6 @@ func (self *tableInfo) GetAllFieldPairs() []*FieldPair {
 }
 
 func (self *tableInfo) GetFieldPairs(fields []string) ([]*FieldPair, error) {
-	// self.RLock()
-	// defer self.RUnlock()
 	res := make([]*FieldPair, 0, len(self.fields))
 	for _, field := range fields {
 		fieldId, ok := self.fields[field]
@@ -108,8 +102,6 @@ func newSchema() *schema {
 }
 
 func (self *schema) Exist(tableName string) bool {
-	// self.RLock()
-	// defer self.RUnlock()
 	if _, ok := self.tables[tableName]; ok {
 		return true
 	} else {
@@ -118,8 +110,6 @@ func (self *schema) Exist(tableName string) bool {
 }
 
 func (self *schema) GetTableInfo(tableName string) *tableInfo {
-	// self.RLock()
-	// defer self.RUnlock()
 	if ti, ok := self.tables[tableName]; ok {
 		return ti
 	} else {
@@ -128,8 +118,6 @@ func (self *schema) GetTableInfo(tableName string) *tableInfo {
 }
 
 func (self *schema) Insert(tableName string, ti *tableInfo) {
-	// self.Lock()
-	// defer self.Unlock()
 	if self.Exist(tableName) {
 		panic(fmt.Sprintf("%s already existed", tableName))
 	}

@@ -8,6 +8,10 @@ cd parser
 make
 cd ..
 
+cd apps/configd
+go build
+cd ../..
+
 go build
 
 # cd test

@@ -13,11 +13,11 @@ import (
 type HttpServer struct {
 	conn     net.Listener
 	addr     string
-	handler  *EngineHandler
+	handler  *QueryEngine
 	exitChan chan int
 }
 
-func NewHttpServer(addr string, handler *EngineHandler) *HttpServer {
+func NewHttpServer(addr string, handler *QueryEngine) *HttpServer {
 	return &HttpServer{
 		addr:     addr,
 		handler:  handler,
@@ -71,6 +71,11 @@ func (self *HttpServer) query(writer http.ResponseWriter, request *http.Request)
 }
 
 func (self *HttpServer) createDatabase(writer http.ResponseWriter, req *http.Request) {
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 
 }
 
