@@ -27,29 +27,39 @@ func (self *logEntryHeader) Write(w io.Writer) error {
 	return nil
 }
 
-func logEntryReadHeader(r io.Reader) (*logEntry, error) {
-	entry := &logEntry{}
+func nextLogEntryHeader(r io.Reader) (int, *logEntryHeader, error) {
+	entry := &logEntryHeader{}
+	size := 0
 	for _, n := range []*uint32{&entry.requestNumber, &entry.length} {
 		if err := binary.Read(r, binary.BigEndian, n); err != nil {
-			return nil, err
+			return size, nil, err
 		}
+		size += 4
 	}
-	return entry, nil
+	return size, entry, nil
 }
 
 type logFile struct {
 	file     *os.File
-	offset   int
-	fielName string
+	fileName string
+	dir      string
 }
 
-func newLogFile(path string, suffix int) *logFile {
-	fielName := path.Join(fmt.Sprintf("%s.%d", path, suffix))
-	file, err := os.OpenFile(fielName, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0644)
-	return &logFile{
-		file:     file,
-		fielName: fielName,
+func newLogFile(dir string, suffix int) (*logFile, error) {
+	fileName := path.Join(fmt.Sprintf("%s.%d", dir, suffix))
+	file, err := os.OpenFile(fileName, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0644)
+	if err != nil {
+		return nil, err
 	}
+	log := &logFile{
+		file:     file,
+		fileName: fileName,
+		dir:      dir,
+	}
+	if err = log.check(); err != nil {
+		return nil, err
+	}
+	return log, nil
 }
 
 func (self *logFile) dupLogFile() (*os.File, error) {
@@ -62,11 +72,6 @@ func (self *logFile) check() error {
 	if err != nil {
 		return err
 	}
-	stat, err := file.Stat()
-	if err != nil {
-		return err
-	}
-	fileSize := stat.Size()
 
 	// move to front
 	offset, err := file.Seek(0, os.SEEK_SET)
@@ -75,30 +80,57 @@ func (self *logFile) check() error {
 	}
 
 	for {
-		entry, err := logEntryReadHeader(file)
+		n, entry, err := nextLogEntryHeader(file)
 		if err != nil {
 			if err == io.EOF {
-
+				return self.file.Truncate(offset)
 			}
 			return err
 		}
-
+		if _, err = file.Seek(int64(entry.length), os.SEEK_CUR); err != nil {
+			return err
+		}
+		offset += int64(n) + int64(entry.length)
 	}
 }
 
-func (self *logFile) Append(req *protocol.Request) error {
-	bytes, err := proto.Marshal(req)
+func (self *logFile) close() {
+	self.file.Close()
+}
+
+func (self *logFile) delete() {
+	glog.V(2).Info("DELETE LOGFILE %s", self.fileName)
+	os.Remove(self.fileName)
+}
+
+func (self *logFile) sync() {
+	self.file.Sync()
+}
+
+func (self *logFile) offset() int64 {
+	offset, _ := self.file.Seek(0, os.SEEK_CUR)
+	return offset
+}
+
+func (self *logFile) append(req *protocol.Request) error {
+	data, err := proto.Marshal(req)
+	if err != nil {
+		glog.Errorf("MARSHAL REQUEST: %s", err.Error())
+		return err
+	}
 
 	entry := &logEntryHeader{
 		requestNumber: req.GetRequestNum(),
-		length:        uint32(len(bytes)),
+		length:        uint32(len(data)),
 	}
-	if err = entry.Write(self.file); err != nil {
+
+	err = entry.Write(self.file)
+	if err != nil {
 		glog.Errorf("WRITE LOG HEADER: %s", err.Error())
 		return err
 	}
-	written, err := self.file.Write(bytes)
-	if err != nil || written < len(bytes) {
+	written, err := self.file.Write(data)
+	if err != nil || written < len(data) {
 		glog.Errorf("WRITE LOG REQUEST: %s", err.Error())
 		return err
 	}
