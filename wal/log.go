@@ -2,10 +2,11 @@ package wal
 
 import (
 	"encoding/binary"
-	"fmt"
 	"io"
 	"os"
 	"path"
+	"strconv"
+	"strings"
 
 	"github.com/senarukana/fundb/protocol"
 
@@ -41,20 +42,25 @@ func nextLogEntryHeader(r io.Reader) (int, *logEntryHeader, error) {
 
 type logFile struct {
 	file     *os.File
-	fileName string
-	dir      string
+	suffix   int
+	filePath string
 }
 
-func newLogFile(dir string, suffix int) (*logFile, error) {
-	fileName := path.Join(fmt.Sprintf("%s.%d", dir, suffix))
-	file, err := os.OpenFile(fileName, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0644)
+func newLogFile(filePath string) (*logFile, error) {
+	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0644)
+	if err != nil {
+		return nil, err
+	}
+
+	suffixString := strings.TrimLeft(path.Base(file.Name()), logPrefix)
+	suffix, err := strconv.Atoi(suffixString)
 	if err != nil {
 		return nil, err
 	}
 	log := &logFile{
 		file:     file,
-		fileName: fileName,
-		dir:      dir,
+		filePath: filePath,
+		suffix:   suffix,
 	}
 	if err = log.check(); err != nil {
 		return nil, err
@@ -72,6 +78,7 @@ func (self *logFile) check() error {
 	if err != nil {
 		return err
 	}
+	defer file.Close()
 
 	// move to front
 	offset, err := file.Seek(0, os.SEEK_SET)
@@ -99,12 +106,12 @@ func (self *logFile) close() {
 }
 
 func (self *logFile) delete() {
-	glog.V(2).Info("DELETE LOGFILE %s", self.fileName)
-	os.Remove(self.fileName)
+	glog.V(2).Info("DELETE LOGFILE %s", self.filePath)
+	os.Remove(self.filePath)
 }
 
-func (self *logFile) sync() {
-	self.file.Sync()
+func (self *logFile) sync() error {
+	return self.file.Sync()
 }
 
 func (self *logFile) offset() int64 {
@@ -119,12 +126,12 @@ func (self *logFile) append(req *protocol.Request) error {
 		return err
 	}
 
-	entry := &logEntryHeader{
+	hdr := &logEntryHeader{
 		requestNumber: req.GetRequestNum(),
 		length:        uint32(len(data)),
 	}
 
-	err = entry.Write(self.file)
+	err = hdr.Write(self.file)
 	if err != nil {
 		glog.Errorf("WRITE LOG HEADER: %s", err.Error())
 		return err
@@ -135,4 +142,101 @@ func (self *logFile) append(req *protocol.Request) error {
 		return err
 	}
 	return nil
+}
+
+func (self *logFile) skipToRequestNum(file *os.File, requestNum uint32) error {
+	for {
+		n, hdr, err := nextLogEntryHeader(file)
+		if err != nil {
+			return err
+		}
+		if hdr.requestNumber < requestNum {
+			if _, err = file.Seek(int64(hdr.length), os.SEEK_CUR); err != nil {
+				return err
+			}
+			continue
+		}
+
+		// move back to the entry header
+		_, err = file.Seek(int64(-n), os.SEEK_CUR)
+		return err
+	}
+}
+
+func (self *logFile) skip(file *os.File, offset int64, requestNum uint32) error {
+	if offset == -1 {
+		return nil
+	}
+	if _, err := file.Seek(offset, os.SEEK_CUR); err != nil {
+		return err
+	}
+	if err := self.skipToRequestNum(file, requestNum); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (self *logFile) replay(offset int64, requestNum uint32) (replayChan chan *replayRequest, stopChan chan bool) {
+	replayChan = make(chan *replayRequest, defaultReplayBuffer)
+	stopChan = make(chan bool)
+	go func() {
+		var err error
+		var file *os.File
+		var req protocol.Request
+
+		defer func() {
+			file.Close()
+			if err != nil {
+				glog.Errorf("REPLAY: %s", err.Error())
+				replay := &replayRequest{
+					err: err,
+				}
+				sendOrStop(replay, replayChan, stopChan)
+			}
+			close(replayChan)
+		}()
+
+		if file, err = self.dupLogFile(); err != nil {
+			return
+		}
+		glog.V(2).Infof("Replay from offset %d", offset)
+		if err = self.skip(file, offset, requestNum); err != nil {
+			glog.Errorf("REPLAY SKIP: %s", err.Error())
+			return
+		}
+
+		for {
+			_, hdr, e := nextLogEntryHeader(file)
+			if e != nil {
+				if e == io.EOF {
+					err = nil
+				} else {
+					err = e
+				}
+				return
+			}
+			data := make([]byte, hdr.length)
+			if _, err = file.Read(data); err != nil {
+				return
+			}
+			if err = proto.Unmarshal(data, &req); err != nil {
+				return
+			}
+			if sendOrStop(newReplayRequest(&req), replayChan, stopChan) {
+				return
+			}
+		}
+	}()
+
+	return replayChan, stopChan
+}
+
+func sendOrStop(req *replayRequest, replayChan chan *replayRequest, stopChan chan bool) bool {
+	select {
+	case replayChan <- req:
+	case _, ok := <-stopChan:
+		glog.Errorf("Stopping replay")
+		return ok
+	}
+	return false
 }

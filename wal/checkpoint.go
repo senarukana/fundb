@@ -26,22 +26,27 @@ type checkPoint struct {
 type checkPointFile struct {
 	file        *os.File
 	checkPoints []*checkPoint
-	fileName    string
+	filePath    string
+	suffix      int
 	offset      int
-	dir         string
 }
 
-func newCheckPointFile(dir string, suffix int) (*checkPointFile, error) {
-	fileName := path.Join(fmt.Sprintf("%s.%d", dir, suffix))
-	file, err := os.OpenFile(fileName, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0644)
+func newCheckPointFile(filePath string) (*checkPointFile, error) {
+	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0644)
+	if err != nil {
+		return nil, err
+	}
+
+	suffixString := strings.TrimLeft(path.Base(file.Name()), checkPointPrefix)
+	suffix, err := strconv.Atoi(suffixString)
 	if err != nil {
 		return nil, err
 	}
 
 	ck := &checkPointFile{
 		file:     file,
-		fileName: fileName,
-		dir:      dir,
+		filePath: filePath,
+		suffix:   suffix,
 	}
 	if err = ck.recover(); err != nil {
 		return nil, err
@@ -56,10 +61,16 @@ func (self *checkPointFile) recover() error {
 	}
 
 	lines := strings.Split(string(content), "\n")
-	checkPoints := make([]*checkPoint, len(lines))
+	checkPoints := make([]*checkPoint, 0, len(lines))
 
 	for _, line := range lines {
-		fields := strings.Split(line, ",")
+		if line == "" {
+			continue
+		}
+		fields := strings.Split(line, ".")
+		if len(fields) != 4 {
+			return fmt.Errorf("INVALID checkpoint format: %s", line)
+		}
 		firstRequestNumber, err := strconv.ParseInt(fields[0], 10, 64)
 		if err != nil {
 			return err
@@ -92,21 +103,22 @@ func (self *checkPointFile) close() {
 }
 
 func (self *checkPointFile) delete() {
-	glog.V(2).Info("DELETE CHECKPOINT FILE %s", self.fileName)
-	os.Remove(self.file.Name())
+	glog.V(2).Info("DELETE CHECKPOINT FILE %s", self.filePath)
+	os.Remove(self.filePath)
 }
 
-func (self *checkPointFile) sync() {
-	self.file.Sync()
+func (self *checkPointFile) sync() error {
+	return self.file.Sync()
 }
 
-func (self *checkPointFile) append(ck *checkPoint) {
+func (self *checkPointFile) append(ck *checkPoint) error {
 	_, err := fmt.Fprintf(self.file, "%d.%d.%d.%d\n", ck.RequestNumStart, ck.RequestNumEnd, ck.FirstOffset, ck.LastOffset)
 	if err != nil {
 		glog.Errorf("APPEND CHECKPOINT: %s", err.Error())
-		return
+		return err
 	}
 	self.checkPoints = append(self.checkPoints, ck)
+	return nil
 }
 
 func (self *checkPointFile) getLastOffset() int64 {
@@ -114,6 +126,13 @@ func (self *checkPointFile) getLastOffset() int64 {
 		return 0
 	}
 	return self.checkPoints[len(self.checkPoints)-1].LastOffset
+}
+
+func (self *checkPointFile) getLastRequestNum() uint32 {
+	if len(self.checkPoints) == 0 {
+		return 0
+	}
+	return self.checkPoints[len(self.checkPoints)-1].RequestNumEnd
 }
 
 func (self *checkPointFile) getRequestOffset(requestNum uint32) int64 {
@@ -128,7 +147,8 @@ func (self *checkPointFile) getRequestOffset(requestNum uint32) int64 {
 		return -1
 	}
 	index := sort.Search(n, func(i int) bool {
-		return requestNum <= self.checkPoints[0].RequestNumEnd
+		return requestNum <= self.checkPoints[i].RequestNumEnd
 	})
+	glog.Errorf("rn : %d, file %s offset %d", requestNum, self.file.Name(), self.checkPoints[index].FirstOffset)
 	return self.checkPoints[index].FirstOffset
 }

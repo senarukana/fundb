@@ -2,8 +2,11 @@ package wal
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 	"os"
+
+	"github.com/golang/glog"
 )
 
 type state struct {
@@ -14,22 +17,36 @@ type state struct {
 	CurrentFileOffset int64
 }
 
-func newState(path string) *state {
-	return &state{
+func (self *state) String() string {
+	return fmt.Sprintf("RequestNum:%d, CommitNum:%d, FileNum:%d, FileOffset: %d",
+		self.CurrentRequestNum, self.CurrentCommitNum, self.CurrentFileNum, self.CurrentFileOffset)
+}
+
+func newState(path string) (*state, error) {
+	file, err := os.Open(path)
+	s := &state{
 		path: path,
 	}
+	if os.IsNotExist(err) {
+		return s, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err = s.read(file); err != nil {
+		return nil, err
+	}
+	return s, nil
 }
 
 func (self *state) GetNextRequestNum() uint32 {
-	num := self.CurrentRequestNum
 	self.CurrentRequestNum++
-	return num
+	return self.CurrentRequestNum
 }
 
 func (self *state) GetNextFileNum() int32 {
-	num := self.CurrentFileNum
 	self.CurrentFileNum++
-	return num
+	return self.CurrentFileNum
 }
 
 func (self *state) Commit(requestNum uint32) {
@@ -37,6 +54,7 @@ func (self *state) Commit(requestNum uint32) {
 }
 
 func (self *state) Sync() error {
+	glog.V(4).Infof("STATE SYNC: %s", self)
 	newName := self.path + ".new"
 	newFile, err := os.OpenFile(newName, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
@@ -61,6 +79,7 @@ func (self *state) Sync() error {
 }
 
 func (self *state) write(w io.Writer) error {
+
 	if err := binary.Write(w, binary.BigEndian, self.CurrentRequestNum); err != nil {
 		return err
 	}
