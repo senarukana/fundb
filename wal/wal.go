@@ -22,7 +22,9 @@ const (
 	defaultReplayBuffer            = 10
 	defaultBufferSize              = 10 // 1024
 	defaultCheckpointAfterRequests = 10 // 1024
+	defaultFlushAfterRequests      = 10 // 1024
 	defaultBookmarkAfterRequests   = 20 // 1024 * 32
+	defualtCommitSinceLastClean    = 20
 	defaultRotateThreshold         = 100
 )
 
@@ -39,6 +41,7 @@ type WriteAheadLog struct {
 	requestsSinceLastBookmark   uint32
 	requestsSinceLastFlush      uint32
 	requestsSinceRotation       uint32
+	commitSinceLastClean        uint32
 }
 
 func NewWriteAheadLog() (*WriteAheadLog, error) {
@@ -99,12 +102,24 @@ func NewWriteAheadLog() (*WriteAheadLog, error) {
 		glog.Errorf(log.file.Name())
 	}
 
+	if err := wal.recover(); err != nil {
+		glog.Warningf("WAL RECOVER: %s", err.Error())
+	}
+
 	go wal.process()
 	return wal, nil
 }
 
 func (self *WriteAheadLog) Commit(requestNum uint32) error {
 	self.state.Commit(requestNum)
+	self.commitSinceLastClean++
+	if self.commitSinceLastClean > defualtCommitSinceLastClean {
+		self.commitSinceLastClean = 0
+		if err := self.sync(); err != nil {
+			return err
+		}
+		self.deleteObsoleteFiles()
+	}
 	return nil
 }
 
@@ -118,13 +133,63 @@ func (self *WriteAheadLog) Append(req *protocol.Request) (uint32, error) {
 	return resp.requestNum, resp.err
 }
 
+func (self *WriteAheadLog) RecoverFromLastCommit(do func(request *protocol.Request) error) error {
+	recoverIdx := -1
+	for i, ckFile := range self.checkPointFiles {
+		if ckFile.getRequestOffset(self.state.CurrentCommitNum) != -1 {
+			recoverIdx = i
+			break
+		}
+	}
+	glog.Errorf("RECOVER FROM IDX %d", recoverIdx)
+	if recoverIdx == -1 {
+		glog.Errorf("CAN'T FIND REQUEST NUM IN ANY CHECKPOINT FILES, RECOVER FROM START")
+		recoverIdx = 0
+	}
+	ckfile := self.checkPointFiles[recoverIdx]
+	offset := ckfile.getRequestOffset(self.state.CurrentCommitNum)
+	glog.Errorf("RECOVER FILE: %s FROM OFFSET %d", self.logFiles[recoverIdx].file.Name(), offset)
+
+	// in case the log file is rotated or deleted
+	logFiles := make([]*logFile, len(self.logFiles))
+	copy(logFiles, self.logFiles)
+
+	for i := recoverIdx; i < len(logFiles); i++ {
+		logfile := logFiles[i]
+		if i > recoverIdx {
+			offset = -1
+		}
+		replayChan, stopChan := logfile.replay(offset, self.state.CurrentCommitNum)
+		count := 0
+
+		for {
+			replay := <-replayChan
+			if replay == nil {
+				glog.Errorf("REPLAY FROM FILE %s COMPLETE, COUNT = %d", logfile.file.Name(), count)
+				close(stopChan)
+				break
+			}
+			if replay.err != nil {
+				return replay.err
+			}
+			if err := do(replay.request); err != nil {
+				glog.Errorf("DO REPLAY ERROR: %s", err.Error())
+				stopChan <- true
+				return err
+			}
+			count++
+		}
+	}
+	return nil
+}
+
 func (self *WriteAheadLog) Close(sync bool) {
 	self.closeChan <- sync
 	<-self.completeChan
 }
 
 func (self *WriteAheadLog) process() {
-	checkPointTick := time.NewTicker(time.Second)
+	syncTick := time.NewTicker(time.Second)
 	deleteObsoleteTick := time.NewTicker(time.Microsecond * 10)
 	for {
 		select {
@@ -133,21 +198,15 @@ func (self *WriteAheadLog) process() {
 			case *appendRequest:
 				self.processAppendRequest(t)
 			}
-		case _ = <-checkPointTick.C:
-			self.checkpoint()
+		case _ = <-syncTick.C:
+			if err := self.sync(); err != nil {
+				glog.Warningf("SYNC WAL: %s", err.Error())
+			}
 		case _ = <-deleteObsoleteTick.C:
 			self.deleteObsoleteFiles()
 		case sync := <-self.closeChan:
 			if sync {
-				if err := self.flush(); err != nil {
-					glog.Errorf("FLUSH TO LOGFILE: %s", err.Error())
-				}
-				if err := self.checkpoint(); err != nil {
-					glog.Errorf("CHECKPOINT: %s", err.Error())
-				}
-				if err := self.bookmark(); err != nil {
-					glog.Errorf("BOOKMARK: %s", err.Error())
-				}
+				self.sync()
 			}
 			goto exit
 		}
@@ -208,7 +267,7 @@ func (self *WriteAheadLog) deleteObsoleteFiles() {
 	if index == 0 {
 		return
 	}
-	glog.Errorf("DELETE OBSOLETE FILE TO %d", index)
+	glog.V(3).Infof("DELETE OBSOLETE FILE TO %d", index)
 	var obsoleteLogFiles []*logFile
 	var obsoleteCheckPointFiles []*checkPointFile
 
@@ -229,7 +288,7 @@ func (self *WriteAheadLog) createNewLog() error {
 		return err
 	}
 	self.state.CurrentFileOffset = 0
-	return nil
+	return self.state.Sync()
 }
 
 func (self *WriteAheadLog) openLog(suffix int) error {
@@ -248,55 +307,43 @@ func (self *WriteAheadLog) openLog(suffix int) error {
 	return nil
 }
 
-func (self *WriteAheadLog) Recover(do func(request *protocol.Request) error) error {
-	return self.recover(do)
+func (self *WriteAheadLog) sync() error {
+	if err := self.flush(); err != nil {
+		glog.Errorf("FLUSH TO LOGFILE: %s", err.Error())
+	}
+	if err := self.checkpoint(); err != nil {
+		glog.Errorf("CHECKPOINT: %s", err.Error())
+	}
+	if err := self.bookmark(); err != nil {
+		glog.Errorf("BOOKMARK: %s", err.Error())
+	}
+	return nil
 }
 
-func (self *WriteAheadLog) recover(do func(request *protocol.Request) error) error {
-	recoverIdx := -1
-	for i, ckFile := range self.checkPointFiles {
-		if ckFile.getRequestOffset(self.state.CurrentCommitNum) != -1 {
-			recoverIdx = i
+// recover from the last log file to get the latest request num
+func (self *WriteAheadLog) recover() error {
+	if self.logFiles == nil {
+		return nil
+	}
+	lastLogFile := self.logFiles[len(self.logFiles)-1]
+
+	replayChan, stopChan := lastLogFile.replay(-1, 0)
+	count := 0
+
+	for {
+		replay := <-replayChan
+		if replay == nil {
+			glog.Errorf("REPLAY FROM FILE %s COMPLETE, COUNT = %d", lastLogFile.file.Name(), count)
+			close(stopChan)
 			break
 		}
-	}
-	glog.Errorf("RECOVER FROM IDX %d", recoverIdx)
-	if recoverIdx == -1 {
-		glog.Fatalln("CAN'T FIND REQUEST NUM IN CHECKPOINT FILES")
-	}
-	ckfile := self.checkPointFiles[recoverIdx]
-	offset := ckfile.getRequestOffset(self.state.CurrentCommitNum)
-	glog.Errorf("RECOVER FILE: %s FROM OFFSET %d", self.logFiles[recoverIdx].file.Name(), offset)
-
-	// in case the log file is rotated or deleted
-	logFiles := make([]*logFile, len(self.logFiles))
-	copy(logFiles, self.logFiles)
-
-	for i := recoverIdx; i < len(logFiles); i++ {
-		logfile := logFiles[i]
-		if i > recoverIdx {
-			offset = -1
+		if replay.err != nil {
+			return replay.err
 		}
-		replayChan, stopChan := logfile.replay(offset, self.state.CurrentCommitNum)
-		count := 0
-
-		for {
-			replay := <-replayChan
-			if replay == nil {
-				glog.Errorf("REPLAY FROM FILE %s COMPLETE, COUNT = %d", logfile.file.Name(), count)
-				close(stopChan)
-				break
-			}
-			if replay.err != nil {
-				return replay.err
-			}
-			if err := do(replay.request); err != nil {
-				glog.Errorf("DO REPLAY ERROR: %s", err.Error())
-				stopChan <- true
-				return err
-			}
-			count++
+		if replay.request.GetRequestNum() > self.state.CurrentRequestNum {
+			self.state.CurrentRequestNum = replay.request.GetRequestNum()
 		}
+		count++
 	}
 	return nil
 }
@@ -337,11 +384,17 @@ func (self *WriteAheadLog) conditionalIndex() error {
 			return err
 		}
 	}
+
+	if self.requestsSinceLastFlush >= defaultFlushAfterRequests {
+		if err := self.flush(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
 func (self *WriteAheadLog) flush() error {
-	glog.Errorf("Fsyncing the log file to disk")
+	glog.V(4).Infof("flush the log file to disk")
 	self.requestsSinceLastFlush = 0
 	lastIndex := len(self.logFiles) - 1
 	if err := self.logFiles[lastIndex].sync(); err != nil {

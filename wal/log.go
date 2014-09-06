@@ -169,7 +169,6 @@ func (self *logFile) skip(file *os.File, offset int64, requestNum uint32) error 
 	if offset == -1 {
 		return nil
 	}
-	stat, _ := file.Stat()
 	if _, err := file.Seek(offset, os.SEEK_CUR); err != nil {
 		return err
 	}

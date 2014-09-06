@@ -42,6 +42,7 @@ func TestWALAppendAndCommit(t *testing.T) {
 		wal.Commit(uint32(i + 1))
 	}
 	wal.Close(true)
+	wal.truncate()
 }
 
 func TestWALRecovery(t *testing.T) {
@@ -64,9 +65,10 @@ func TestWALRecovery(t *testing.T) {
 
 	wal, err = NewWriteAheadLog()
 	assert.Equal(t, err, nil)
+	assert.Equal(t, wal.state.CurrentRequestNum, uint32(appendNum))
 
 	recoverCounter = 0
-	err = wal.Recover(recoverDoCounter)
+	err = wal.RecoverFromLastCommit(recoverDoCounter)
 	wal.truncate()
 	assert.Equal(t, err, nil)
 	assert.Equal(t, recoverCounter, appendNum-commitNum+1)

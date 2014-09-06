@@ -18,7 +18,7 @@ type state struct {
 }
 
 func (self *state) String() string {
-	return fmt.Sprintf("RequestNum:%d, CommitNum:%d, FileNum:%d, FileOffset: %d",
+	return fmt.Sprintf("STATE: [RequestNum:%d, CommitNum:%d, FileNum:%d, FileOffset: %d]",
 		self.CurrentRequestNum, self.CurrentCommitNum, self.CurrentFileNum, self.CurrentFileOffset)
 }
 
@@ -61,9 +61,6 @@ func (self *state) Sync() error {
 		return err
 	}
 
-	if _, err := newFile.Seek(0, os.SEEK_SET); err != nil {
-		return err
-	}
 	if err := self.write(newFile); err != nil {
 		return err
 	}
