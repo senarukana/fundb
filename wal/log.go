@@ -145,11 +145,13 @@ func (self *logFile) append(req *protocol.Request) error {
 }
 
 func (self *logFile) skipToRequestNum(file *os.File, requestNum uint32) error {
+	glog.V(4).Infof("FILE %s, SKIP TO %d", file.Name(), requestNum)
 	for {
 		n, hdr, err := nextLogEntryHeader(file)
 		if err != nil {
 			return err
 		}
+		glog.V(4).Infof("RN : %d", hdr.requestNumber)
 		if hdr.requestNumber < requestNum {
 			if _, err = file.Seek(int64(hdr.length), os.SEEK_CUR); err != nil {
 				return err
@@ -167,6 +169,7 @@ func (self *logFile) skip(file *os.File, offset int64, requestNum uint32) error 
 	if offset == -1 {
 		return nil
 	}
+	stat, _ := file.Stat()
 	if _, err := file.Seek(offset, os.SEEK_CUR); err != nil {
 		return err
 	}
@@ -199,11 +202,11 @@ func (self *logFile) replay(offset int64, requestNum uint32) (replayChan chan *r
 		if file, err = self.dupLogFile(); err != nil {
 			return
 		}
-		glog.V(2).Infof("Replay from offset %d", offset)
 		if err = self.skip(file, offset, requestNum); err != nil {
 			glog.Errorf("REPLAY SKIP: %s", err.Error())
 			return
 		}
+		glog.V(2).Infof("FILE %s BEGIN REPLAYING FROM OFFSET %d", offset)
 
 		for {
 			_, hdr, e := nextLogEntryHeader(file)

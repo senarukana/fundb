@@ -75,11 +75,11 @@ func (self *checkPointFile) recover() error {
 		if err != nil {
 			return err
 		}
-		lastRequestNumber, err := strconv.ParseInt(fields[2], 10, 64)
+		lastRequestNumber, err := strconv.ParseInt(fields[1], 10, 64)
 		if err != nil {
 			return err
 		}
-		firstOffset, err := strconv.ParseInt(fields[1], 10, 64)
+		firstOffset, err := strconv.ParseInt(fields[2], 10, 64)
 		if err != nil {
 			return err
 		}
@@ -149,6 +149,7 @@ func (self *checkPointFile) getRequestOffset(requestNum uint32) int64 {
 	index := sort.Search(n, func(i int) bool {
 		return requestNum <= self.checkPoints[i].RequestNumEnd
 	})
-	glog.Errorf("rn : %d, file %s offset %d", requestNum, self.file.Name(), self.checkPoints[index].FirstOffset)
+	glog.Errorf("rn : %d, file %s offset %d, start %d, end %d", requestNum, self.file.Name(), self.checkPoints[index].FirstOffset,
+		self.checkPoints[0].RequestNumStart, self.checkPoints[n-1].RequestNumEnd)
 	return self.checkPoints[index].FirstOffset
 }

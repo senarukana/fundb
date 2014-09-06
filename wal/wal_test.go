@@ -23,26 +23,26 @@ func recoverDoCounter(request *protocol.Request) error {
 	return nil
 }
 
-// func TestWALAppendAndCommit(t *testing.T) {
-// 	wal, err := NewWriteAheadLog()
-// 	if err != nil {
-// 		t.Fatalf("OPEN WAL ERROR: %s", err.Error())
-// 	}
+func TestWALAppendAndCommit(t *testing.T) {
+	wal, err := NewWriteAheadLog()
+	if err != nil {
+		t.Fatalf("OPEN WAL ERROR: %s", err.Error())
+	}
 
-// 	for i := 0; i < 1000; i++ {
-// 		reqNum, err := wal.Append(generateRequest())
-// 		assert.Equal(t, reqNum, uint32(i+1))
-// 		if err != nil {
-// 			t.Fatal(err.Error())
-// 		}
-// 		assert.Equal(t, err, nil)
-// 	}
+	for i := 0; i < 1000; i++ {
+		reqNum, err := wal.Append(generateRequest())
+		assert.Equal(t, reqNum, uint32(i+1))
+		if err != nil {
+			t.Fatal(err.Error())
+		}
+		assert.Equal(t, err, nil)
+	}
 
-// 	for i := 0; i < 1000; i++ {
-// 		wal.Commit(uint32(i + 1))
-// 	}
-// 	wal.Close(true)
-// }
+	for i := 0; i < 1000; i++ {
+		wal.Commit(uint32(i + 1))
+	}
+	wal.Close(true)
+}
 
 func TestWALRecovery(t *testing.T) {
 	wal, err := NewWriteAheadLog()
@@ -67,6 +67,7 @@ func TestWALRecovery(t *testing.T) {
 
 	recoverCounter = 0
 	err = wal.Recover(recoverDoCounter)
+	wal.truncate()
 	assert.Equal(t, err, nil)
-	assert.Equal(t, recoverCounter, commitNum)
+	assert.Equal(t, recoverCounter, appendNum-commitNum+1)
 }

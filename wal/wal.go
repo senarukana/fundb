@@ -264,14 +264,20 @@ func (self *WriteAheadLog) recover(do func(request *protocol.Request) error) err
 	if recoverIdx == -1 {
 		glog.Fatalln("CAN'T FIND REQUEST NUM IN CHECKPOINT FILES")
 	}
+	ckfile := self.checkPointFiles[recoverIdx]
+	offset := ckfile.getRequestOffset(self.state.CurrentCommitNum)
+	glog.Errorf("RECOVER FILE: %s FROM OFFSET %d", self.logFiles[recoverIdx].file.Name(), offset)
 
-	for i := recoverIdx; i < len(self.logFiles); i++ {
-		logfile := self.logFiles[i]
-		ckfile := self.checkPointFiles[len(self.checkPointFiles)-1]
+	// in case the log file is rotated or deleted
+	logFiles := make([]*logFile, len(self.logFiles))
+	copy(logFiles, self.logFiles)
 
-		offset := ckfile.getRequestOffset(self.state.CurrentCommitNum)
-		glog.Errorf("RECOVER FILE: %s FROM OFFSET %d", logfile.file.Name(), offset)
-		replayChan, stopChan := logfile.replay(offset, self.state.CurrentRequestNum)
+	for i := recoverIdx; i < len(logFiles); i++ {
+		logfile := logFiles[i]
+		if i > recoverIdx {
+			offset = -1
+		}
+		replayChan, stopChan := logfile.replay(offset, self.state.CurrentCommitNum)
 		count := 0
 
 		for {
@@ -369,4 +375,9 @@ func (self *WriteAheadLog) checkpoint() error {
 	}
 	self.requestsSinceLastCheckpoint = 0
 	return nil
+}
+
+// for test only
+func (self *WriteAheadLog) truncate() {
+	os.RemoveAll(self.logdir)
 }
