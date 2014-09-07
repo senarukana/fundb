@@ -7,6 +7,7 @@ import (
 	"io"
 )
 
+var MagicV1 = []byte("  V1")
 var byteSpace = []byte(" ")
 var byteNewLine = []byte("\n")
 

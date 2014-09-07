@@ -1,5 +1,6 @@
 package core
 
-type DBEngine interface {
+type Store interface {
+	IsLocal() bool
 	Query(sql string) *Response
 }

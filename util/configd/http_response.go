@@ -20,7 +20,6 @@ func ConfigdResponse(w http.ResponseWriter, statusCode int, statusTxt string, da
 	if err != nil {
 		response = []byte(fmt.Sprintf(`{"status_code":500, "status_txt":"%s", "data":null}`, err.Error()))
 	}
-
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Content-Length", strconv.Itoa(len(response)))
 	w.WriteHeader(statusCode)

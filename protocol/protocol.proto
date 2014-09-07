@@ -1,0 +1,37 @@
+package protocol;
+
+message NodeInfo {
+    required  uint32 id = 1;
+    required string address = 2; 
+    required string host_name = 3;
+    optional int32 tcp_port = 4;
+    optional int32 http_port = 5; 
+}
+
+message FieldValue {
+    optional string str_val = 1;
+    optional int64 int_val = 2;
+    optional double double_val = 3;
+    optional bool bool_val = 4;
+}
+
+message Record {
+    repeated FieldValue values = 1;
+    required int64 id = 2;
+    required uint32 sequenceNum = 3;
+    required int64 timestamp = 4;
+}
+
+message RecordList {
+    required string name = 1;
+    repeated string fields = 2;
+    repeated Record values = 3;
+}
+
+message Request {
+    optional uint32 server_id = 1;
+    required int32 request_num = 2;
+    optional int32 shard_id = 3;
+    optional string query = 4;
+    optional string database = 5;
+}

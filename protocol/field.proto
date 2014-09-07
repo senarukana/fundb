@@ -1,8 +1,0 @@
-package protocol;
-
-message FieldValue {
-    optional string str_val = 1;
-    optional int64 int_val = 2;
-    optional double double_val = 3;
-    optional bool bool_val = 4;
-}
