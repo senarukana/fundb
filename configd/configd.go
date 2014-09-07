@@ -46,13 +46,21 @@ func NewConfigServer(options *configServerOptions) *ConfigServer {
 }
 
 func (self *ConfigServer) Start() {
+	tcpListener, err := net.Listen("tcp", self.tcpAddr.String())
+	if err != nil {
+		glog.Fatalf("listen (%s) failed - %s", self.tcpAddr, err.Error())
+	}
+	tcpServer := &tcpServer{
+		configServer: self,
+	}
+	self.waitGroup.Wrap(func() { util.TCPServer(tcpListener, tcpServer) })
+
 	httpListener, err := net.Listen("tcp", self.httpAddr.String())
 	if err != nil {
-		glog.Fatalf("FATAL: listen (%s) failed - %s", self.httpAddr, err.Error())
+		glog.Fatalf("listen (%s) failed - %s", self.httpAddr, err.Error())
 	}
 	self.httpListener = httpListener
 	httpServer := &httpServer{configServer: self}
-
 	self.waitGroup.Wrap(func() { util.HTTPServer(httpListener, httpServer, "HTTP") })
 }
 

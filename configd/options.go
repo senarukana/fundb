@@ -1,27 +1,31 @@
 package configd
 
 import (
-	"log"
 	"os"
+	"time"
+
+	"github.com/golang/glog"
 )
 
 type configServerOptions struct {
 	Verbose bool `flag:"verbose"`
 
-	TCPAddress       string `flag:"tcp-address"`
-	HTTPAddress      string `flag:"http-address"`
-	BroadcastAddress string `flag:"broadcast-address"`
+	TCPAddress       string        `flag:"tcp-address"`
+	HTTPAddress      string        `flag:"http-address"`
+	BroadcastAddress string        `flag:"broadcast-address"`
+	InActiveTimeout  time.Duration `flag:"inactive-timeout"`
 }
 
-func NewConfigServerOptions() *configServerOptions {
+func NewConfigServerOptions(tcpAddr, httpAddr string) *configServerOptions {
 	hostname, err := os.Hostname()
 	if err != nil {
-		log.Fatal(err)
+		glog.Fatal(err)
 	}
 
 	return &configServerOptions{
-		TCPAddress:       "0.0.0.0:4160",
-		HTTPAddress:      "0.0.0.0:4161",
+		TCPAddress:       tcpAddr,
+		HTTPAddress:      httpAddr,
 		BroadcastAddress: hostname,
+		InActiveTimeout:  time.Second * 30,
 	}
 }

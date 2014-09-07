@@ -22,7 +22,7 @@ type ConfigdProtocolV1 struct {
 
 type ClientV1 struct {
 	net.Conn
-	nodeInfo *protocol.NodeInfo
+	node *node
 }
 
 func NewClientV1(conn net.Conn) *ClientV1 {
@@ -66,8 +66,8 @@ func (self *ConfigdProtocolV1) IOLoop(conn net.Conn) error {
 		}
 	}
 	glog.V(2).Infof("CLIENT(%s): closing", client)
-	if client.nodeInfo != nil {
-		self.configServer.db.RemoveNode(client.nodeInfo)
+	if client.node != nil {
+		self.configServer.db.RemoveNode(client.node)
 		glog.V(2).Infof("client(%s) UNREGISTER", client)
 	}
 	return err
@@ -86,7 +86,7 @@ func (self *ConfigdProtocolV1) Exec(client *ClientV1, reader *bufio.Reader, para
 func (self *ConfigdProtocolV1) Identify(client *ClientV1, reader *bufio.Reader, params []string) ([]byte, error) {
 	var err error
 
-	if client.nodeInfo != nil {
+	if client.node != nil {
 		return nil, fmt.Errorf("cannot IDENTIFY again")
 	}
 
@@ -103,21 +103,20 @@ func (self *ConfigdProtocolV1) Identify(client *ClientV1, reader *bufio.Reader, 
 	}
 
 	// body is a json structure with producer information
-	nodeInfo := protocol.NodeInfo{}
-	err = proto.Unmarshal(body, &nodeInfo)
+	ni := protocol.NodeInfo{}
+	err = proto.Unmarshal(body, &ni)
 	if err != nil {
 		return nil, fmt.Errorf("IDENTIFY failed to decode node info")
 	}
 	addr := client.RemoteAddr().String()
-	nanoTime := time.Now().UnixNano()
-	nodeInfo.Address = &addr
-	nodeInfo.LastUpdate = &nanoTime
+	ni.Address = proto.String(addr)
+	node := newNode(&ni)
 
-	glog.V(1).Infof("CLIENT(%s): IDENTIFY Address:%s TCP:%d HTTP:%d",
-		client, nodeInfo.GetAddress(), nodeInfo.GetTcpPort(), nodeInfo.GetHttpPort())
+	glog.V(2).Infof("CLIENT(%s): IDENTIFY Address:%s TCP:%d HTTP:%d",
+		client, ni.GetAddress(), ni.GetTcpPort(), ni.GetHttpPort())
 
-	client.nodeInfo = &nodeInfo
-	if self.configServer.db.AddNode(&nodeInfo) {
+	client.node = node
+	if self.configServer.db.AddNode(node) {
 		glog.V(2).Infof("DB: client(%s) REGISTER COMPLETE", client)
 	}
 
@@ -141,10 +140,10 @@ func (self *ConfigdProtocolV1) Identify(client *ClientV1, reader *bufio.Reader, 
 }
 
 func (self *ConfigdProtocolV1) Ping(client *ClientV1, params []string) ([]byte, error) {
-	if client.nodeInfo != nil {
-		now := time.Now().UnixNano()
-		glog.V(3).Infof("CLIENT(%s): pinged (last ping %d ms)", client.nodeInfo.GetAddress(), (now-client.nodeInfo.GetLastUpdate())/1000)
-		client.nodeInfo.LastUpdate = &now
+	if client.node != nil {
+		now := time.Now()
+		glog.V(4).Infof("CLIENT(%s): pinged (last ping: %s)", client.node.GetAddress(), client.node.lastUpdate)
+		client.node.lastUpdate = now
 	}
 	return []byte("OK"), nil
 }

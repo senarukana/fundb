@@ -36,13 +36,16 @@ func (self *tcpServer) Handle(clientConn net.Conn) {
 	default:
 		util.SendResponse(clientConn, []byte("E_BAD_PROTOCOL"))
 		clientConn.Close()
-		glog.Errorf("ERROR: client(%s) bad protocol magic '%s'", clientConn.RemoteAddr(), protocolMagic)
+		glog.Errorf("client(%s) bad protocol magic '%s'", clientConn.RemoteAddr(), protocolMagic)
 		return
 	}
 
 	err = prot.IOLoop(clientConn)
 	if err != nil {
-		glog.Errorf("ERROR: client(%s) - %s", clientConn.RemoteAddr(), err.Error())
-		return
+		if err == io.EOF {
+			glog.V(4).Infof("client(%s) is leaving", clientConn.RemoteAddr())
+		} else {
+			glog.Errorf("client(%s) - %s", clientConn.RemoteAddr(), err.Error())
+		}
 	}
 }
