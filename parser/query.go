@@ -2,6 +2,8 @@ package parser
 
 import (
 	"fmt"
+
+	"github.com/golang/glog"
 )
 
 type QueryType int
@@ -44,10 +46,58 @@ func (err ParserError) Error() string {
 	return err.Message
 }
 
+type Query interface {
+	Validate() error
+	GetSplitIds(splitField string) (ids []int64)
+	GetTableName() string
+}
+
 type InsertQuery struct {
 	Table string
 	*ColumnFields
 	*ValueList
+}
+
+func (self *InsertQuery) Validate() error {
+	if len(self.Values[0].Items) != len(self.Fields) {
+		return fmt.Errorf("syntax error: Incompatible fields(%d) and values(%d)",
+			len(self.Values[0].Items), len(self.Fields))
+	}
+
+	var paramCount = -1
+	for valueIndex, valueItems := range self.Values {
+		if paramCount == -1 {
+			paramCount = len(valueItems.Items)
+		}
+		if paramCount != len(valueItems.Items) {
+			return fmt.Errorf("syntax error: Incompatible value paramters in %d, paremter num is %d, exptected %d",
+				valueIndex, len(valueItems.Items), paramCount)
+		}
+
+	}
+	return nil
+}
+
+func (self *InsertQuery) GetSplitIds(splitField string) (ids []int64) {
+	idx := -1
+	for i, field := range self.Fields {
+		if field == splitField {
+			idx = i
+			break
+		}
+	}
+
+	if idx == -1 {
+		glog.Fatalf("NOT FOUND SPLIT FIELD %s IN INSERT QUERY", splitField)
+	}
+	for _, values := range self.Values {
+		ids = append(ids, values.Items[idx].GetVal().GetIntVal())
+	}
+	return ids
+}
+
+func (self *InsertQuery) GetTableName() string {
+	return self.Table
 }
 
 type SelectQuery struct {
@@ -67,9 +117,9 @@ type CreateTableQuery struct {
 	Type TableIdType
 }
 
-type Query struct {
+type QuerySpec struct {
 	Type  QueryType
-	Query interface{}
+	Query Query
 }
 
 func ParseQuery(query string) (*Query, error) {
@@ -78,5 +128,8 @@ func ParseQuery(query string) (*Query, error) {
 		return nil, NewParserError(lex.LastError)
 	}
 	parsedQuery := ParsedQuery
+	if err := parsedQuery.Validate(); err != nil {
+		return nil, err
+	}
 	return parsedQuery, nil
 }
