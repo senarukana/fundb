@@ -5,12 +5,13 @@ A distributed database based on LevelDB.
 
 #Progress
 1. [Done] SQL parser, simple SQL Query.
-2. [In Progress] Config server
-2. [TODO] Write Buffer, Write Ahead log
-3. [TODO] Shard
+2. [Done] Config server
+3. [Done] Write Buffer, Write Ahead log
+4. [TODO] Shard
+5. [TODO] Cross Shard Query
 
 #Building
-You'll need the following dependencies: protobuf, goprotobuf, flex
+You'll need the following dependencies: protobuf, goprotobuf, bison
 
     go get code.google.com/p/goprotobuf/
 
